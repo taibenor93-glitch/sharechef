@@ -22,6 +22,7 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
   const [chatInput, setChatInput] = useState("")
   const hasGreeted = useRef(false)
   const [lastIngredients, setLastIngredients] = useState<string[]>([])
+  const [yummiStarLevel, setYummiStarLevel] = useState(0)
 
   const maxIngredients = 4
 
@@ -84,6 +85,7 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
       }
       storage?.setItem?.("yummi_star_level", String(level))
       const leveledUp = Number.isFinite(currentLevel) ? level > currentLevel : level > 0
+      setYummiStarLevel(level)
       return { level, leveledUp }
     } catch (err) {
       console.warn("Could not persist recipe_cooked_count", err)
@@ -125,6 +127,20 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
     if (hasGreeted.current) return
     hasGreeted.current = true
     void speak("Tell me what you've got, and I'll turn it into a recipe.")
+  }, [])
+
+  useEffect(() => {
+    try {
+      const storedLevel =
+        typeof window !== "undefined"
+          ? Number.parseInt(window.localStorage.getItem("yummi_star_level") ?? "0", 10)
+          : 0
+      if (Number.isFinite(storedLevel)) {
+        setYummiStarLevel(storedLevel)
+      }
+    } catch {
+      /* ignore */
+    }
   }, [])
 
   async function speakInOrder(reply: string) {
@@ -195,6 +211,9 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
   return (
     <main style={{ padding: 40, maxWidth: 900, margin: "0 auto" }}>
       <h1>ShareChef</h1>
+      <div style={{ marginBottom: 12, fontWeight: 600 }}>
+        Yummi Star: {yummiStarLevel >= 1 ? `Level ${yummiStarLevel}` : "Locked"}
+      </div>
 
       <input
         placeholder="Ingredient 1"
