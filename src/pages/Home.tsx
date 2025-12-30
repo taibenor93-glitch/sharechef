@@ -13,14 +13,63 @@ type ChatMessage = {
   text: string
 }
 
+type SharePlatform = "facebook" | "instagram" | "tiktok"
+
 export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref) {
   const [ingredients, setIngredients] = useState({ one: "", two: "", three: "" })
   const [result, setResult] = useState("")
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [chatInput, setChatInput] = useState("")
   const hasGreeted = useRef(false)
+  const [lastIngredients, setLastIngredients] = useState<string[]>([])
 
   const maxIngredients = 4
+
+  function buildSharePayload(
+    recipeText: string,
+    ingredientList: string[]
+  ): { title: string; text: string } {
+    const title =
+      recipeText
+        .split("\n")
+        .map((s) => s.trim())
+        .find(Boolean) || "ShareChef Recipe"
+    const ingredientsSummary = ingredientList.slice(0, 3).join(", ")
+    const text = `${title}\nIngredients: ${ingredientsSummary}\nMade with ShareChef / Yummi Guide`
+    return { title, text }
+  }
+
+  async function shareRecipe(
+    platform: SharePlatform,
+    recipeText: string,
+    lastList: string[],
+    fallbackList: string[]
+  ) {
+    const nav: any = typeof navigator !== "undefined" ? navigator : undefined
+    const ingredientsForShare = lastList.length ? lastList : fallbackList
+    const sharePayload = buildSharePayload(recipeText, ingredientsForShare)
+
+    if (nav?.share) {
+      try {
+        await nav.share({ title: sharePayload.title, text: sharePayload.text })
+        return
+      } catch (err) {
+        console.warn("Native share failed, falling back.", err)
+      }
+    }
+
+    const encoded = encodeURIComponent(sharePayload.text)
+    if (platform === "facebook") {
+      window.open(`https://www.facebook.com/sharer/sharer.php?quote=${encoded}`, "_blank")
+    } else {
+      try {
+        await nav?.clipboard?.writeText?.(sharePayload.text)
+        console.log(`Copied share text for ${platform}`)
+      } catch {
+        console.log(`Share text for ${platform}: ${sharePayload.text}`)
+      }
+    }
+  }
 
   function normalizeList(items: string[]): string[] {
     return items
@@ -55,7 +104,7 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
   useEffect(() => {
     if (hasGreeted.current) return
     hasGreeted.current = true
-    void speak("Hi, what do you feel like cooking today?")
+    void speak("Hi — what do you have in your kitchen today?")
   }, [])
 
   async function speakInOrder(reply: string) {
@@ -92,6 +141,7 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
 
     setResult(reply)
     addMessage("assistant", reply)
+    setLastIngredients(runList)
     await speakInOrder(reply)
   }
 
@@ -177,7 +227,34 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
         </div>
       </section>
 
-      {result && <pre>{result}</pre>}
+      {result && (
+        <div style={{ marginTop: 16 }}>
+          <pre>{result}</pre>
+          <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button
+              onClick={() => {
+                void shareRecipe("facebook", result, lastIngredients, list)
+              }}
+            >
+              Share to Facebook
+            </button>
+            <button
+              onClick={() => {
+                void shareRecipe("instagram", result, lastIngredients, list)
+              }}
+            >
+              Share to Instagram
+            </button>
+            <button
+              onClick={() => {
+                void shareRecipe("tiktok", result, lastIngredients, list)
+              }}
+            >
+              Share to TikTok
+            </button>
+          </div>
+        </div>
+      )}
     </main>
   )
 })
