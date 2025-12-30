@@ -1,0 +1,13 @@
+run = "npm install --silent && npm run dev -- --host --port ${PORT}"
+
+[env]
+PORT = "3000"
+
+[packager]
+language = "nodejs"
+
+[nix]
+channel = "stable-23.11"
+
+[hidden]
+paths = [".cache", "node_modules", "replit.nix"]
