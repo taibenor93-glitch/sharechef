@@ -58,9 +58,13 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
 
     const synth = (window as any).speechSynthesis
     synth?.cancel?.()
+    const ack = "Got it."
+    console.log("SPEAKING:", ack)
+    await speak(ack)
+
     const text = resultText
     console.log("SPEAKING:", text)
-    speak(text)
+    await speak(text)
   }
 
   useImperativeHandle(
