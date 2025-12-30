@@ -71,6 +71,17 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
     }
   }
 
+  function incrementCookedCount() {
+    try {
+      const storage = typeof window !== "undefined" ? window.localStorage : undefined
+      const current = Number.parseInt(storage?.getItem?.("recipe_cooked_count") ?? "0", 10)
+      const next = Number.isFinite(current) ? current + 1 : 1
+      storage?.setItem?.("recipe_cooked_count", String(next))
+    } catch (err) {
+      console.warn("Could not persist recipe_cooked_count", err)
+    }
+  }
+
   function normalizeList(items: string[]): string[] {
     return items
       .flatMap((s) => s.split(/[,\n]+/))
@@ -142,6 +153,7 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
     setResult(reply)
     addMessage("assistant", reply)
     setLastIngredients(runList)
+    incrementCookedCount()
     await speakInOrder(reply)
   }
 
