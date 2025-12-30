@@ -77,6 +77,9 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
       const current = Number.parseInt(storage?.getItem?.("recipe_cooked_count") ?? "0", 10)
       const next = Number.isFinite(current) ? current + 1 : 1
       storage?.setItem?.("recipe_cooked_count", String(next))
+      if (next >= 20) {
+        storage?.setItem?.("yummi_star_unlocked", "true")
+      }
     } catch (err) {
       console.warn("Could not persist recipe_cooked_count", err)
     }
