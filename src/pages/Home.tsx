@@ -1,4 +1,4 @@
-import { forwardRef, useImperativeHandle, useMemo, useState } from "react"
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react"
 import { generateRecipe } from "../api/recipe"
 import { validateIngredients } from "../lib/honestRules"
 import { speak } from "../voice/tts"
@@ -8,17 +8,29 @@ export type HomePageHandle = {
   optimizeWithList: (items: string[]) => Promise<void>
 }
 
+type ChatMessage = {
+  role: "user" | "assistant"
+  text: string
+}
+
 export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref) {
   const [ingredients, setIngredients] = useState({ one: "", two: "", three: "" })
   const [result, setResult] = useState("")
+  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [chatInput, setChatInput] = useState("")
+  const hasGreeted = useRef(false)
 
-  const maxIngredients = 3
+  const maxIngredients = 4
 
-  const list = useMemo(() => {
-    return [ingredients.one, ingredients.two, ingredients.three]
+  function normalizeList(items: string[]): string[] {
+    return items
       .flatMap((s) => s.split(/[,\n]+/))
       .map((s) => s.trim())
       .filter(Boolean)
+  }
+
+  const list = useMemo(() => {
+    return normalizeList([ingredients.one, ingredients.two, ingredients.three])
   }, [ingredients])
 
   function updateIngredient(
@@ -26,45 +38,69 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
     value: string
   ) {
     const nextIngredients = { ...ingredients, [key]: value }
-    const nextList = [nextIngredients.one, nextIngredients.two, nextIngredients.three]
-      .flatMap((s) => s.split(/[,\n]+/))
-      .map((s) => s.trim())
-      .filter(Boolean)
+    const nextList = normalizeList([nextIngredients.one, nextIngredients.two, nextIngredients.three])
 
     if (nextList.length > maxIngredients) {
-      setResult("Honest Optimization: max 3 ingredients.")
+      setResult("Honest Optimization: max 3 ingredients plus 1 pantry add-on.")
       return
     }
 
     setIngredients(nextIngredients)
   }
 
-  async function optimize(listOverride?: string[]): Promise<string | undefined> {
-    const runList = listOverride ?? list
-    const v = validateIngredients(runList)
-    if (!v.ok) {
-      setResult(v.message)
-      return v.message
-    }
-
-    const recipe = await generateRecipe(runList)
-    setResult(recipe)
-    return recipe
+  function addMessage(role: ChatMessage["role"], text: string) {
+    setMessages((prev) => [...prev, { role, text }])
   }
 
-  async function optimizeAndSpeak(listOverride?: string[]) {
-    const resultText = await optimize(listOverride)
-    if (!resultText) return
+  useEffect(() => {
+    if (hasGreeted.current) return
+    hasGreeted.current = true
+    void speak("Hi, what do you feel like cooking today?")
+  }, [])
 
+  async function speakInOrder(reply: string) {
     const synth = (window as any).speechSynthesis
     synth?.cancel?.()
     const ack = "Got it."
     console.log("SPEAKING:", ack)
     await speak(ack)
 
-    const text = resultText
-    console.log("SPEAKING:", text)
-    await speak(text)
+    console.log("SPEAKING:", reply)
+    await speak(reply)
+  }
+
+  async function runAssistant(listOverride?: string[], rawUserText?: string) {
+    const runList = normalizeList(listOverride ?? list)
+    const userText = rawUserText ?? runList.join(", ")
+    if (userText) {
+      addMessage("user", userText)
+    }
+
+    const validation = validateIngredients(runList)
+    if (!validation.ok) {
+      setResult(validation.message)
+      addMessage("assistant", validation.message)
+      await speakInOrder(validation.message)
+      return
+    }
+
+    const recipe = await generateRecipe(runList)
+    const pantryNote = validation.pantryAddOn
+      ? `Adding pantry add-on: ${validation.pantryAddOn}.`
+      : ""
+    const reply = pantryNote ? `${pantryNote}\n\n${recipe}` : recipe
+
+    setResult(reply)
+    addMessage("assistant", reply)
+    await speakInOrder(reply)
+  }
+
+  function handleSendChat() {
+    const parsedList = normalizeList([chatInput])
+    if (!parsedList.length) return
+
+    void runAssistant(parsedList, chatInput)
+    setChatInput("")
   }
 
   useImperativeHandle(
@@ -74,9 +110,9 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
         const [one = "", two = "", three = ""] = items
         setIngredients({ one, two, three })
       },
-      optimizeWithList: (items: string[]) => optimizeAndSpeak(items),
+      optimizeWithList: (items: string[]) => runAssistant(items, items.join(", ")),
     }),
-    [optimizeAndSpeak]
+    [runAssistant]
   )
 
   return (
@@ -105,13 +141,41 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
         }
       />
 
-      <button
-        onClick={() => {
-          void optimizeAndSpeak()
-        }}
-      >
-        Optimize
-      </button>
+      <div style={{ marginTop: 16 }}>
+        <button
+          onClick={() => {
+            void runAssistant()
+          }}
+        >
+          Optimize
+        </button>
+      </div>
+
+      <section style={{ marginTop: 24, padding: 12, border: "1px solid #ddd" }}>
+        <h2>Conversation</h2>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 }}>
+          {messages.map((msg, idx) => (
+            <div key={`${msg.role}-${idx}`}>
+              <strong>{msg.role === "user" ? "You" : "Assistant"}:</strong> {msg.text}
+            </div>
+          ))}
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input
+            placeholder="Type ingredients, e.g., eggs, rice"
+            value={chatInput}
+            onChange={(e) => setChatInput(e.target.value)}
+            style={{ flex: 1 }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault()
+                handleSendChat()
+              }
+            }}
+          />
+          <button onClick={handleSendChat}>Send</button>
+        </div>
+      </section>
 
       {result && <pre>{result}</pre>}
     </main>

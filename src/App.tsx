@@ -23,7 +23,7 @@ export default function App(): JSX.Element {
               .split(",")
               .map((s) => s.trim())
               .filter(Boolean)
-              .slice(0, 3)
+              .slice(0, 4)
 
             homeRef.current?.setIngredientsFromVoice?.(list)
             await homeRef.current?.optimizeWithList?.(list)
