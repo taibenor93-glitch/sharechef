@@ -1,3 +1,3 @@
 export async function generateRecipe(ingredients: string[]) {
-  return `Recipe coming soon for: ${ingredients.join(", ")}`
+  return `Got it — ${ingredients.join(" and ")}. I'm putting a recipe together now.`
 }
