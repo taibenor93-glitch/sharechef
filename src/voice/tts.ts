@@ -9,16 +9,17 @@ export function speak(text: string): Promise<void> {
 
     synth.cancel()
 
-    const utterance = new SpeechSynthesisUtterance(text)
-    utterance.text = text
-    utterance.lang = "en-US"
-    utterance.rate = 1
-    utterance.pitch = 1
+  const utterance = new SpeechSynthesisUtterance(text)
+  utterance.text = text
+  utterance.lang = "en-US"
+  utterance.rate = 0.92
+  utterance.pitch = 1
+  const preferredVoices = ["Samantha", "Allison", "Alex", "Victoria"]
 
-    const cleanup = () => {
-      utterance.onend = null
-      utterance.onerror = null
-      synth.onvoiceschanged = null
+  const cleanup = () => {
+    utterance.onend = null
+    utterance.onerror = null
+    synth.onvoiceschanged = null
     }
 
     utterance.onend = () => {
@@ -31,24 +32,30 @@ export function speak(text: string): Promise<void> {
       reject(event instanceof Error ? event : new Error(String(event?.error ?? event)))
     }
 
-    const voices = synth.getVoices?.() ?? []
+  const voices = synth.getVoices?.() ?? []
 
-    if (!voices.length) {
-      synth.onvoiceschanged = () => {
-        const refreshedVoices = synth.getVoices?.() ?? []
-        const refreshedVoice = refreshedVoices.find((v: SpeechSynthesisVoice) => v.lang === "en-US")
-        if (refreshedVoice) {
-          utterance.voice = refreshedVoice
-        }
-        synth.speak(utterance)
+  const pickVoice = (voiceList: SpeechSynthesisVoice[]) => {
+    const enUsVoices = voiceList.filter((v: SpeechSynthesisVoice) => v.lang === "en-US")
+    const preferred = enUsVoices.find((v) => preferredVoices.includes(v.name))
+    return preferred ?? enUsVoices[0]
+  }
+
+  if (!voices.length) {
+    synth.onvoiceschanged = () => {
+      const refreshedVoices = synth.getVoices?.() ?? []
+      const refreshedVoice = pickVoice(refreshedVoices)
+      if (refreshedVoice) {
+        utterance.voice = refreshedVoice
       }
-      return
+      synth.speak(utterance)
     }
+    return
+  }
 
-    const voice = voices.find((v: SpeechSynthesisVoice) => v.lang === "en-US")
-    if (voice) {
-      utterance.voice = voice
-    }
+  const voice = pickVoice(voices)
+  if (voice) {
+    utterance.voice = voice
+  }
 
     synth.speak(utterance)
   })
