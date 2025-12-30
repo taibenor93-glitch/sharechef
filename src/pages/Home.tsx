@@ -104,6 +104,11 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
     return normalizeList([ingredients.one, ingredients.two, ingredients.three])
   }, [ingredients])
 
+  const yummiStarLabel =
+    yummiStarLevel <= 0
+      ? "Yummi Star: Locked"
+      : `Yummi Star: ${"⭐".repeat(Math.min(yummiStarLevel, 3))}`
+
   function updateIngredient(
     key: "one" | "two" | "three",
     value: string
@@ -210,9 +215,9 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
 
   return (
     <main style={{ padding: 40, maxWidth: 900, margin: "0 auto" }}>
-      <h1>ShareChef</h1>
-      <div style={{ marginBottom: 12, fontWeight: 600 }}>
-        Yummi Star: {yummiStarLevel >= 1 ? `Level ${yummiStarLevel}` : "Locked"}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <h1>ShareChef</h1>
+        <div style={{ fontSize: 12, color: "#5c677d" }}>{yummiStarLabel}</div>
       </div>
 
       <input
