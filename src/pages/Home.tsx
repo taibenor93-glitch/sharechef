@@ -120,7 +120,7 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
   useEffect(() => {
     if (hasGreeted.current) return
     hasGreeted.current = true
-    void speak("Hi — what do you have in your kitchen today?")
+    void speak("Tell me what you've got, and I'll turn it into a recipe.")
   }, [])
 
   async function speakInOrder(reply: string) {
