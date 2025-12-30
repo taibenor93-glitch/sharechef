@@ -50,6 +50,8 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
     const ingredientsForShare = lastList.length ? lastList : fallbackList
     const sharePayload = buildSharePayload(recipeText, ingredientsForShare)
 
+    incrementMetric("recipe_share_count")
+
     if (nav?.share) {
       try {
         await nav.share({ title: sharePayload.title, text: sharePayload.text })
@@ -108,6 +110,17 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
     yummiStarLevel <= 0
       ? "Yummi Star: Locked"
       : `Yummi Star: ${"⭐".repeat(Math.min(yummiStarLevel, 3))}`
+
+  function incrementMetric(key: string) {
+    try {
+      const storage = typeof window !== "undefined" ? window.localStorage : undefined
+      const current = Number.parseInt(storage?.getItem?.(key) ?? "0", 10)
+      const next = Number.isFinite(current) ? current + 1 : 1
+      storage?.setItem?.(key, String(next))
+    } catch (err) {
+      console.warn(`Could not persist metric ${key}`, err)
+    }
+  }
 
   function updateIngredient(
     key: "one" | "two" | "three",
@@ -184,6 +197,7 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
     addMessage("assistant", reply)
     setLastIngredients(runList)
     const progress = incrementCookedCount()
+    incrementMetric("recipe_view_count")
     await speakInOrder(reply)
 
     if (progress.leveledUp) {
