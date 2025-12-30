@@ -71,10 +71,11 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
     }
   }
 
-  function incrementCookedCount() {
+  function incrementCookedCount(): { level: number; leveledUp: boolean } {
     try {
       const storage = typeof window !== "undefined" ? window.localStorage : undefined
       const current = Number.parseInt(storage?.getItem?.("recipe_cooked_count") ?? "0", 10)
+      const currentLevel = Number.parseInt(storage?.getItem?.("yummi_star_level") ?? "0", 10)
       const next = Number.isFinite(current) ? current + 1 : 1
       storage?.setItem?.("recipe_cooked_count", String(next))
       const level = next >= 100 ? 3 : next >= 50 ? 2 : next >= 20 ? 1 : 0
@@ -82,9 +83,12 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
         storage?.setItem?.("yummi_star_unlocked", "true")
       }
       storage?.setItem?.("yummi_star_level", String(level))
+      const leveledUp = Number.isFinite(currentLevel) ? level > currentLevel : level > 0
+      return { level, leveledUp }
     } catch (err) {
       console.warn("Could not persist recipe_cooked_count", err)
     }
+    return { level: 0, leveledUp: false }
   }
 
   function normalizeList(items: string[]): string[] {
@@ -158,8 +162,14 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
     setResult(reply)
     addMessage("assistant", reply)
     setLastIngredients(runList)
-    incrementCookedCount()
+    const progress = incrementCookedCount()
     await speakInOrder(reply)
+
+    if (progress.leveledUp) {
+      const celebration = "Nice work — you've earned a Yummi Star."
+      addMessage("assistant", celebration)
+      await speak(celebration)
+    }
   }
 
   function handleSendChat() {
