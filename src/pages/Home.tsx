@@ -197,11 +197,11 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
   function translateValidation(text: string, language: string): string {
     const key = baseLang(language)
     if (key === "he") {
-      if (text.startsWith("Honest Optimization: add at least 2 ingredients")) {
-        return "אופטימיזציה: הוסף לפחות שני מרכיבים."
+      if (text.startsWith("Need at least 2 ingredients")) {
+        return "צריך לפחות 2 מרכיבים למתכון."
       }
-      if (text.startsWith("Honest Optimization: max 3 ingredients plus 1 pantry add-on")) {
-        return "אופטימיזציה: מקסימום 3 מרכיבים ועוד אחד מהמזווה."
+      if (text.startsWith("Max 3 ingredients plus 1 pantry add-on")) {
+        return "מותר עד 3 מרכיבים ועוד אחד מהמזווה."
       }
     }
     return text
@@ -245,7 +245,8 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
     const nextList = normalizeList([nextIngredients.one, nextIngredients.two, nextIngredients.three])
 
     if (nextList.length > maxIngredients) {
-      setResult("Honest Optimization: max 3 ingredients plus 1 pantry add-on.")
+      const msg = "Max 3 ingredients plus 1 pantry add-on."
+      setResult(translateValidation(msg, userLanguage))
       return
     }
 
