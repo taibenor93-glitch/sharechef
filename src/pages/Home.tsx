@@ -13,7 +13,7 @@ type ChatMessage = {
   text: string
 }
 
-type SharePlatform = "facebook" | "instagram" | "tiktok"
+type SharePlatform = "facebook" | "instagram" | "tiktok" | "youtube"
 
 export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref) {
   const [ingredients, setIngredients] = useState({ one: "", two: "", three: "" })
@@ -64,6 +64,8 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
     const encoded = encodeURIComponent(sharePayload.text)
     if (platform === "facebook") {
       window.open(`https://www.facebook.com/sharer/sharer.php?quote=${encoded}`, "_blank")
+    } else if (platform === "youtube") {
+      window.open("https://www.youtube.com/upload", "_blank")
     } else {
       try {
         await nav?.clipboard?.writeText?.(sharePayload.text)
@@ -316,6 +318,13 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
               }}
             >
               Share to TikTok
+            </button>
+            <button
+              onClick={() => {
+                void shareRecipe("youtube", result, lastIngredients, list)
+              }}
+            >
+              Share to YouTube
             </button>
           </div>
         </div>
