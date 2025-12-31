@@ -29,12 +29,14 @@ export function speak(text: string, language = "en"): Promise<void> {
     const locale = normalizeLocale(language)
     const padded =
       text
-        .replace(/(\d)(?=\D)/g, "$1,")
+        .replace(/(\d)(?![\d.,])/g, "$1, ")
         .replace(/([:;])\s*/g, "$1 ")
         .replace(/(\.)(?!\s)/g, ". ")
+        .replace(/([!?])(?!\s)/g, "$1 ")
+        .replace(/(,)(?!\s)/g, ", ")
     utterance.text = padded
     utterance.lang = locale
-    utterance.rate = 0.84
+    utterance.rate = 0.8
     utterance.pitch = 1
     const preferredVoices = ["Samantha", "Allison", "Alex", "Victoria"]
 
