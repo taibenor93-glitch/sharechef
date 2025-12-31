@@ -270,7 +270,7 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
               onChange={(e) => {
                 const next = e.target.value as SupportedLanguage | "__custom"
                 if (next === "__custom") {
-                  setUserLanguage(customLanguage || "en")
+                  setUserLanguage("__custom")
                   return
                 }
                 setUserLanguage(next)
