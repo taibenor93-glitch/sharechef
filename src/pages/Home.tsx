@@ -112,10 +112,55 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
     return normalizeList([ingredients.one, ingredients.two, ingredients.three])
   }, [ingredients])
 
+  function baseLang(language?: string): string {
+    return (language ?? "en").split(/[-_]/)[0].toLowerCase()
+  }
+
   const yummiStarLabel =
     yummiStarLevel <= 0
       ? "Yummi Star: Locked"
       : `Yummi Star: ${"⭐".repeat(Math.min(yummiStarLevel, 3))}`
+
+  const copyByLang: Record<
+    string,
+    { greeting: string; ack: string; celebration: string }
+  > = {
+    en: {
+      greeting: "Tell me what you've got and I'll cook up a recipe.",
+      ack: "Got it.",
+      celebration: "Nice work — you earned a Yummi Star.",
+    },
+    es: {
+      greeting: "Cuéntame qué tienes y preparo una receta.",
+      ack: "Entendido.",
+      celebration: "Buen trabajo: ganaste una Yummi Star.",
+    },
+    fr: {
+      greeting: "Dis-moi ce que tu as et je prépare une recette.",
+      ack: "C'est noté.",
+      celebration: "Bravo — tu as gagné une Yummi Star.",
+    },
+    it: {
+      greeting: "Dimmi cosa hai e preparo una ricetta.",
+      ack: "Ricevuto.",
+      celebration: "Ottimo lavoro: hai guadagnato una Yummi Star.",
+    },
+    pt: {
+      greeting: "Me conta o que você tem e eu preparo uma receita.",
+      ack: "Entendi.",
+      celebration: "Bom trabalho — você ganhou uma Yummi Star.",
+    },
+    he: {
+      greeting: "תגיד לי מה יש לך ואני אכין לך מתכון.",
+      ack: "קיבלתי.",
+      celebration: "עבודה יפה — הרווחת Yummi Star.",
+    },
+  }
+
+  function getCopy(language: string) {
+    const key = baseLang(language)
+    return copyByLang[key] ?? copyByLang.en
+  }
 
   useEffect(() => {
     try {
@@ -188,13 +233,14 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
   useEffect(() => {
     if (hasGreeted.current) return
     hasGreeted.current = true
-    void speak("Tell me what you've got and I'll cook up a recipe.", userLanguage)
+    const copy = getCopy(userLanguage)
+    void speak(copy.greeting, userLanguage)
   }, [userLanguage])
 
   async function speakInOrder(reply: string) {
     const synth = (window as any).speechSynthesis
     synth?.cancel?.()
-    const ack = "Got it."
+    const ack = getCopy(userLanguage).ack
     console.log("SPEAKING:", ack)
     await speak(ack, userLanguage)
 
@@ -217,7 +263,7 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
       return
     }
 
-    const recipe = await generateRecipe(runList)
+    const recipe = await generateRecipe(runList, userLanguage)
     const pantryNote = validation.pantryAddOn
       ? `Adding pantry add-on: ${validation.pantryAddOn}.`
       : ""
@@ -231,7 +277,7 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
     await speakInOrder(reply)
 
     if (progress.leveledUp) {
-      const celebration = "Nice work — you earned a Yummi Star."
+      const celebration = getCopy(userLanguage).celebration
       addMessage("assistant", celebration)
       await speak(celebration, userLanguage)
     }
