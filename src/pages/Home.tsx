@@ -194,6 +194,28 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
     return copyByLang[key] ?? copyByLang.en
   }
 
+  function translateValidation(text: string, language: string): string {
+    const key = baseLang(language)
+    if (key === "he") {
+      if (text.startsWith("Honest Optimization: add at least 2 ingredients")) {
+        return "אופטימיזציה: הוסף לפחות שני מרכיבים."
+      }
+      if (text.startsWith("Honest Optimization: max 3 ingredients plus 1 pantry add-on")) {
+        return "אופטימיזציה: מקסימום 3 מרכיבים ועוד אחד מהמזווה."
+      }
+    }
+    return text
+  }
+
+  function translatePantryNote(addOn: string | undefined, language: string): string {
+    if (!addOn) return ""
+    const key = baseLang(language)
+    if (key === "he") {
+      return `תוספת מהמזווה: ${addOn}.`
+    }
+    return `Adding pantry add-on: ${addOn}.`
+  }
+
   useEffect(() => {
     try {
       if (typeof window !== "undefined") {
@@ -289,16 +311,15 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
 
     const validation = validateIngredients(runList)
     if (!validation.ok) {
-      setResult(validation.message)
-      addMessage("assistant", validation.message)
-      await speakInOrder(validation.message)
+      const translated = translateValidation(validation.message, userLanguage)
+      setResult(translated)
+      addMessage("assistant", translated)
+      await speakInOrder(translated)
       return
     }
 
     const recipe = await generateRecipe(runList, userLanguage)
-    const pantryNote = validation.pantryAddOn
-      ? `Adding pantry add-on: ${validation.pantryAddOn}.`
-      : ""
+    const pantryNote = translatePantryNote(validation.pantryAddOn, userLanguage)
     const reply = pantryNote ? `${pantryNote}\n\n${recipe}` : recipe
 
     setResult(reply)
