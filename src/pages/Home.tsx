@@ -46,11 +46,11 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
     lastList: string[],
     fallbackList: string[]
   ) {
+    incrementMetric("recipe_share_count")
+
     const nav: any = typeof navigator !== "undefined" ? navigator : undefined
     const ingredientsForShare = lastList.length ? lastList : fallbackList
     const sharePayload = buildSharePayload(recipeText, ingredientsForShare)
-
-    incrementMetric("recipe_share_count")
 
     if (nav?.share) {
       try {
