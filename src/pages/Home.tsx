@@ -14,6 +14,8 @@ type ChatMessage = {
 }
 
 type SharePlatform = "facebook" | "instagram" | "tiktok" | "youtube"
+const supportedLanguages = ["en", "es", "fr", "it", "pt"] as const
+type SupportedLanguage = (typeof supportedLanguages)[number]
 
 export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref) {
   const [ingredients, setIngredients] = useState({ one: "", two: "", three: "" })
@@ -23,6 +25,7 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
   const hasGreeted = useRef(false)
   const [lastIngredients, setLastIngredients] = useState<string[]>([])
   const [yummiStarLevel, setYummiStarLevel] = useState(0)
+  const [userLanguage, setUserLanguage] = useState<SupportedLanguage>("en")
 
   const maxIngredients = 4
 
@@ -144,12 +147,6 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
   }
 
   useEffect(() => {
-    if (hasGreeted.current) return
-    hasGreeted.current = true
-    void speak("Tell me what you've got, and I'll turn it into a recipe.")
-  }, [])
-
-  useEffect(() => {
     try {
       const storedLevel =
         typeof window !== "undefined"
@@ -163,15 +160,35 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
     }
   }, [])
 
+  useEffect(() => {
+    try {
+      const storedLanguage =
+        typeof window !== "undefined" ? window.localStorage.getItem("user_language") : null
+      const normalized =
+        storedLanguage && supportedLanguages.includes(storedLanguage as SupportedLanguage)
+          ? (storedLanguage as SupportedLanguage)
+          : "en"
+      setUserLanguage(normalized)
+    } catch {
+      setUserLanguage("en")
+    }
+  }, [])
+
+  useEffect(() => {
+    if (hasGreeted.current) return
+    hasGreeted.current = true
+    void speak("Tell me what you've got, and I'll turn it into a recipe.", userLanguage)
+  }, [userLanguage])
+
   async function speakInOrder(reply: string) {
     const synth = (window as any).speechSynthesis
     synth?.cancel?.()
     const ack = "Got it."
     console.log("SPEAKING:", ack)
-    await speak(ack)
+    await speak(ack, userLanguage)
 
     console.log("SPEAKING:", reply)
-    await speak(reply)
+    await speak(reply, userLanguage)
   }
 
   async function runAssistant(listOverride?: string[], rawUserText?: string) {
@@ -205,7 +222,7 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
     if (progress.leveledUp) {
       const celebration = "Nice work — you've earned a Yummi Star."
       addMessage("assistant", celebration)
-      await speak(celebration)
+      await speak(celebration, userLanguage)
     }
   }
 
