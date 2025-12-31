@@ -10,6 +10,7 @@ function normalizeLocale(language: string): string {
   const trimmed = (language ?? "en").trim()
   if (!trimmed) return "en-US"
   if (languageToLocale[trimmed]) return languageToLocale[trimmed]
+  if (trimmed.toLowerCase() === "he") return "he-IL"
   return trimmed
 }
 
@@ -38,7 +39,7 @@ export function speak(text: string, language = "en"): Promise<void> {
     utterance.lang = locale
     utterance.rate = 0.8
     utterance.pitch = 1
-    const preferredVoices = ["Samantha", "Allison", "Alex", "Victoria"]
+    const preferredVoices = ["Samantha", "Allison", "Alex", "Victoria", "Carmit", "Adi"]
 
     const cleanup = () => {
       utterance.onend = null
@@ -78,6 +79,13 @@ export function speak(text: string, language = "en"): Promise<void> {
       if (partialMatches.length) {
         const preferredPartial = partialMatches.find((v) => preferredVoices.includes(v.name))
         return preferredPartial ?? partialMatches[0]
+      }
+      // For Hebrew, avoid falling back to English voice if available; prefer first Hebrew/lang-prefix match when present.
+      if (langPrefix === "he" && primaryMatches.length === 0 && partialMatches.length === 0) {
+        const hebrewVoices = voiceList.filter((v: SpeechSynthesisVoice) =>
+          (v.lang ?? "").toLowerCase().startsWith("he")
+        )
+        if (hebrewVoices.length) return hebrewVoices[0]
       }
       const preferredEnglish = englishVoices.find((v) => preferredVoices.includes(v.name))
       return preferredEnglish ?? englishVoices[0]
