@@ -198,10 +198,10 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
     const key = baseLang(language)
     if (key === "he") {
       if (text.startsWith("Need at least 2 ingredients")) {
-        return "צריך לפחות 2 מרכיבים למתכון."
+        return "צריך לפחות שני מרכיבים למתכון."
       }
       if (text.startsWith("Max 3 ingredients plus 1 pantry add-on")) {
-        return "מותר עד 3 מרכיבים ועוד אחד מהמזווה."
+        return "אפשר עד שלושה מרכיבים ועוד אחד מהמזווה."
       }
     }
     return text

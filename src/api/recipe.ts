@@ -53,7 +53,7 @@ const recipeCopies: CopyMap = {
   },
   he: (items, locale) => {
     const formatted = formatIngredients(items, locale)
-    return `קיבלתי — ${formatted}. אני מתחיל להכין את המתכון עכשיו.`
+    return `קיבלתי — ${formatted}. מתחיל להכין את המתכון עכשיו.`
   },
 }
 
