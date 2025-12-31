@@ -261,8 +261,9 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
         <h1 style={{ margin: 0 }}>ShareChef</h1>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ fontSize: 12, color: "#5c677d" }}>{yummiStarLabel}</div>
           <label style={{ fontSize: 12, color: "#5c677d", display: "flex", alignItems: "center", gap: 6 }}>
-            Language:
+            Language
             <select
               value={userLanguage}
               onChange={(e) => {
@@ -276,14 +277,13 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
               }}
               style={{ fontSize: 12, padding: "4px 6px" }}
             >
-              <option value="en">English</option>
-              <option value="es">Español</option>
-              <option value="fr">Français</option>
-              <option value="it">Italiano</option>
-              <option value="pt">Português</option>
+              <option value="en">English (EN)</option>
+              <option value="es">Español (ES)</option>
+              <option value="fr">Français (FR)</option>
+              <option value="it">Italiano (IT)</option>
+              <option value="pt">Português (PT)</option>
             </select>
           </label>
-          <div style={{ fontSize: 12, color: "#5c677d" }}>{yummiStarLabel}</div>
         </div>
       </div>
 
