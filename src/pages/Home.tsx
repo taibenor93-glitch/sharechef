@@ -15,7 +15,7 @@ type ChatMessage = {
 
 type SharePlatform = "facebook" | "instagram" | "tiktok" | "youtube"
 const supportedLanguages = ["en", "es", "fr", "it", "pt"] as const
-type SupportedLanguage = (typeof supportedLanguages)[number]
+type SupportedLanguage = (typeof supportedLanguages)[number] | string
 
 export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref) {
   const [ingredients, setIngredients] = useState({ one: "", two: "", three: "" })
@@ -26,6 +26,7 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
   const [lastIngredients, setLastIngredients] = useState<string[]>([])
   const [yummiStarLevel, setYummiStarLevel] = useState(0)
   const [userLanguage, setUserLanguage] = useState<SupportedLanguage>("en")
+  const [customLanguage, setCustomLanguage] = useState("")
 
   const maxIngredients = 4
 
@@ -174,11 +175,11 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
     try {
       const storedLanguage =
         typeof window !== "undefined" ? window.localStorage.getItem("user_language") : null
-      const normalized =
-        storedLanguage && supportedLanguages.includes(storedLanguage as SupportedLanguage)
-          ? (storedLanguage as SupportedLanguage)
-          : "en"
+      const normalized = storedLanguage || "en"
       setUserLanguage(normalized)
+      if (normalized && !supportedLanguages.includes(normalized as SupportedLanguage)) {
+        setCustomLanguage(normalized)
+      }
     } catch {
       setUserLanguage("en")
     }
@@ -262,13 +263,18 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
         <h1 style={{ margin: 0 }}>ShareChef</h1>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <div style={{ fontSize: 12, color: "#5c677d" }}>{yummiStarLabel}</div>
-          <label style={{ fontSize: 12, color: "#5c677d", display: "flex", alignItems: "center", gap: 6 }}>
-            Language
+          <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#5c677d" }}>
+            <span>Language</span>
             <select
-              value={userLanguage}
+              value={supportedLanguages.includes(userLanguage as SupportedLanguage) ? userLanguage : "__custom"}
               onChange={(e) => {
-                const next = e.target.value as SupportedLanguage
+                const next = e.target.value as SupportedLanguage | "__custom"
+                if (next === "__custom") {
+                  setUserLanguage(customLanguage || "en")
+                  return
+                }
                 setUserLanguage(next)
+                setCustomLanguage("")
                 try {
                   window.localStorage.setItem("user_language", next)
                 } catch {
@@ -282,8 +288,34 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
               <option value="fr">Français (FR)</option>
               <option value="it">Italiano (IT)</option>
               <option value="pt">Português (PT)</option>
+              <option value="__custom">More languages…</option>
             </select>
-          </label>
+            {(!supportedLanguages.includes(userLanguage as SupportedLanguage) || userLanguage === "__custom") && (
+              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                <input
+                  placeholder="e.g., hi-IN or zh-CN"
+                  value={customLanguage}
+                  onChange={(e) => setCustomLanguage(e.target.value)}
+                  style={{ fontSize: 12, padding: "4px 6px", width: 140 }}
+                />
+                <button
+                  onClick={() => {
+                    const next = customLanguage.trim()
+                    if (!next) return
+                    setUserLanguage(next)
+                    try {
+                      window.localStorage.setItem("user_language", next)
+                    } catch {
+                      /* ignore */
+                    }
+                  }}
+                  style={{ fontSize: 12, padding: "4px 8px" }}
+                >
+                  Set
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

@@ -6,6 +6,13 @@ const languageToLocale: Record<string, string> = {
   pt: "pt-PT",
 }
 
+function normalizeLocale(language: string): string {
+  const trimmed = (language ?? "en").trim()
+  if (!trimmed) return "en-US"
+  if (languageToLocale[trimmed]) return languageToLocale[trimmed]
+  return trimmed
+}
+
 export function speak(text: string, language = "en"): Promise<void> {
   return new Promise((resolve, reject) => {
     const synth = (window as any).speechSynthesis
@@ -19,7 +26,7 @@ export function speak(text: string, language = "en"): Promise<void> {
 
     const utterance = new SpeechSynthesisUtterance(text)
     utterance.text = text
-    const locale = languageToLocale[language] ?? "en-US"
+    const locale = normalizeLocale(language)
     utterance.lang = locale
     utterance.rate = 0.92
     utterance.pitch = 1
@@ -45,14 +52,27 @@ export function speak(text: string, language = "en"): Promise<void> {
 
     const pickVoice = (voiceList: SpeechSynthesisVoice[]) => {
       const normalizedLocale = locale.toLowerCase()
-      const matchesLocale = voiceList.filter((v: SpeechSynthesisVoice) =>
-        (v.lang ?? "").toLowerCase().startsWith(normalizedLocale.slice(0, 2))
+      const langPrefix = normalizedLocale.slice(0, 2)
+      const primaryMatches = voiceList.filter((v: SpeechSynthesisVoice) =>
+        (v.lang ?? "").toLowerCase().startsWith(normalizedLocale)
       )
-      if (language === "en") {
-        const preferred = matchesLocale.find((v) => preferredVoices.includes(v.name))
-        return preferred ?? matchesLocale[0]
+      const partialMatches = voiceList.filter((v: SpeechSynthesisVoice) =>
+        (v.lang ?? "").toLowerCase().startsWith(langPrefix)
+      )
+      const englishVoices = voiceList.filter((v: SpeechSynthesisVoice) =>
+        (v.lang ?? "").toLowerCase().startsWith("en")
+      )
+
+      if (primaryMatches.length) {
+        const preferredPrimary = primaryMatches.find((v) => preferredVoices.includes(v.name))
+        return preferredPrimary ?? primaryMatches[0]
       }
-      return matchesLocale[0]
+      if (partialMatches.length) {
+        const preferredPartial = partialMatches.find((v) => preferredVoices.includes(v.name))
+        return preferredPartial ?? partialMatches[0]
+      }
+      const preferredEnglish = englishVoices.find((v) => preferredVoices.includes(v.name))
+      return preferredEnglish ?? englishVoices[0]
     }
 
     if (!voices.length) {
