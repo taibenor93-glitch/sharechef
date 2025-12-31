@@ -27,7 +27,8 @@ export function speak(text: string, language = "en"): Promise<void> {
 
     const utterance = new SpeechSynthesisUtterance(text)
     utterance.text = text
-    const locale = normalizeLocale(language)
+    const localeInput = normalizeLocale(language)
+    const locale = localeInput.toLowerCase().startsWith("he") ? "he-IL" : localeInput
     const padded =
       text
         .replace(/(\d)(?![\d.,])/g, "$1, ")
@@ -57,11 +58,15 @@ export function speak(text: string, language = "en"): Promise<void> {
       reject(event instanceof Error ? event : new Error(String(event?.error ?? event)))
     }
 
-    const voices = synth.getVoices?.() ?? []
-
     const pickVoice = (voiceList: SpeechSynthesisVoice[]) => {
       const normalizedLocale = locale.toLowerCase()
       const langPrefix = normalizedLocale.slice(0, 2)
+      const hebrewVoices = voiceList.filter((v: SpeechSynthesisVoice) =>
+        (v.lang ?? "").toLowerCase().startsWith("he")
+      )
+      const hePrimary =
+        hebrewVoices.find((v) => (v.lang ?? "").toLowerCase() === "he-il") ??
+        hebrewVoices.find((v) => (v.lang ?? "").toLowerCase().startsWith("he-il"))
       const primaryMatches = voiceList.filter((v: SpeechSynthesisVoice) =>
         (v.lang ?? "").toLowerCase().startsWith(normalizedLocale)
       )
@@ -72,6 +77,11 @@ export function speak(text: string, language = "en"): Promise<void> {
         (v.lang ?? "").toLowerCase().startsWith("en")
       )
 
+      if (langPrefix === "he") {
+        if (hePrimary) return hePrimary
+        if (hebrewVoices.length) return hebrewVoices[0]
+      }
+
       if (primaryMatches.length) {
         const preferredPrimary = primaryMatches.find((v) => preferredVoices.includes(v.name))
         return preferredPrimary ?? primaryMatches[0]
@@ -80,34 +90,30 @@ export function speak(text: string, language = "en"): Promise<void> {
         const preferredPartial = partialMatches.find((v) => preferredVoices.includes(v.name))
         return preferredPartial ?? partialMatches[0]
       }
-      // For Hebrew, avoid falling back to English voice if available; prefer first Hebrew/lang-prefix match when present.
-      if (langPrefix === "he" && primaryMatches.length === 0 && partialMatches.length === 0) {
-        const hebrewVoices = voiceList.filter((v: SpeechSynthesisVoice) =>
-          (v.lang ?? "").toLowerCase().startsWith("he")
-        )
-        if (hebrewVoices.length) return hebrewVoices[0]
-      }
       const preferredEnglish = englishVoices.find((v) => preferredVoices.includes(v.name))
       return preferredEnglish ?? englishVoices[0]
     }
 
-    if (!voices.length) {
-      synth.onvoiceschanged = () => {
-        const refreshedVoices = synth.getVoices?.() ?? []
-      const refreshedVoice = pickVoice(refreshedVoices)
-      if (refreshedVoice) {
-        utterance.voice = refreshedVoice
+    const speakWithVoices = () => {
+      const voices = synth.getVoices?.() ?? []
+      const voice = pickVoice(voices)
+      if (voice) {
+        utterance.voice = voice
+      }
+      if (locale.toLowerCase().startsWith("he") && voice) {
+        console.log("TTS voice (he):", voice.name, voice.lang)
       }
       synth.speak(utterance)
     }
-    return
-  }
 
-  const voice = pickVoice(voices)
-  if (voice) {
-    utterance.voice = voice
-  }
+    if (!synth.getVoices?.()?.length) {
+      synth.onvoiceschanged = () => {
+        synth.onvoiceschanged = null
+        speakWithVoices()
+      }
+      return
+    }
 
-    synth.speak(utterance)
+    speakWithVoices()
   })
 }
