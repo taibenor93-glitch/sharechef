@@ -177,7 +177,7 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
   useEffect(() => {
     if (hasGreeted.current) return
     hasGreeted.current = true
-    void speak("Tell me what you've got, and I'll turn it into a recipe.", userLanguage)
+    void speak("Tell me what you've got and I'll cook up a recipe.", userLanguage)
   }, [userLanguage])
 
   async function speakInOrder(reply: string) {
@@ -220,7 +220,7 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
     await speakInOrder(reply)
 
     if (progress.leveledUp) {
-      const celebration = "Nice work — you've earned a Yummi Star."
+      const celebration = "Nice work — you earned a Yummi Star."
       addMessage("assistant", celebration)
       await speak(celebration, userLanguage)
     }
