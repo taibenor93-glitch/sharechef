@@ -112,6 +112,38 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
     return normalizeList([ingredients.one, ingredients.two, ingredients.three])
   }, [ingredients])
 
+  const localeNameMap: Record<string, string> = {
+    hebrew: "he",
+    עברית: "he",
+    arabic: "ar",
+    ar: "ar",
+    hindi: "hi",
+    hindi: "hi",
+    japanese: "ja",
+    japanese: "ja",
+    chinese: "zh-CN",
+    中文: "zh-CN",
+    mandarin: "zh-CN",
+    spanish: "es",
+    español: "es",
+    french: "fr",
+    français: "fr",
+    italian: "it",
+    italiano: "it",
+    portuguese: "pt",
+    português: "pt",
+    german: "de",
+    deutsch: "de",
+    korean: "ko",
+    russian: "ru",
+    turkish: "tr",
+    dutch: "nl",
+    swedish: "sv",
+    norwegian: "no",
+    finnish: "fi",
+    danish: "da",
+  }
+
   function baseLang(language?: string): string {
     return (language ?? "en").split(/[-_]/)[0].toLowerCase()
   }
@@ -346,11 +378,16 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
                 />
                 <button
                   onClick={() => {
-                    const next = customLanguage.trim()
-                    if (!next) return
-                    setUserLanguage(next)
+                    const raw = customLanguage.trim()
+                    if (!raw) return
+                    const lower = raw.toLowerCase()
+                    const mapped = localeNameMap[lower] ?? raw
+                    const normalized = mapped.trim()
+                    const isValid = /^[a-z]{2,3}(-[a-zA-Z]{2})?$/.test(normalized)
+                    if (!isValid) return
+                    setUserLanguage(normalized)
                     try {
-                      window.localStorage.setItem("user_language", next)
+                      window.localStorage.setItem("user_language", normalized)
                     } catch {
                       /* ignore */
                     }
