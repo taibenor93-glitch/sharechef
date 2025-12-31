@@ -116,6 +116,16 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
       ? "Yummi Star: Locked"
       : `Yummi Star: ${"⭐".repeat(Math.min(yummiStarLevel, 3))}`
 
+  useEffect(() => {
+    try {
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem("user_language", userLanguage)
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [userLanguage])
+
   function incrementMetric(key: string) {
     try {
       const storage = typeof window !== "undefined" ? window.localStorage : undefined
@@ -248,9 +258,33 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
 
   return (
     <main style={{ padding: 40, maxWidth: 900, margin: "0 auto" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <h1>ShareChef</h1>
-        <div style={{ fontSize: 12, color: "#5c677d" }}>{yummiStarLabel}</div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+        <h1 style={{ margin: 0 }}>ShareChef</h1>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <label style={{ fontSize: 12, color: "#5c677d", display: "flex", alignItems: "center", gap: 6 }}>
+            Language:
+            <select
+              value={userLanguage}
+              onChange={(e) => {
+                const next = e.target.value as SupportedLanguage
+                setUserLanguage(next)
+                try {
+                  window.localStorage.setItem("user_language", next)
+                } catch {
+                  /* ignore */
+                }
+              }}
+              style={{ fontSize: 12, padding: "4px 6px" }}
+            >
+              <option value="en">English</option>
+              <option value="es">Español</option>
+              <option value="fr">Français</option>
+              <option value="it">Italiano</option>
+              <option value="pt">Português</option>
+            </select>
+          </label>
+          <div style={{ fontSize: 12, color: "#5c677d" }}>{yummiStarLabel}</div>
+        </div>
       </div>
 
       <input
