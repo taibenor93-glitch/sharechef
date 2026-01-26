@@ -15,7 +15,12 @@ export function SavedListPage() {
   const [error, setError] = useState<string | null>(null)
 
   const fetchRecipes = async () => {
-    if (!session) return
+    if (!session) {
+      setLoading(false)
+      setRecipes([])
+      setError(null)
+      return
+    }
     setLoading(true)
     setError(null)
 
