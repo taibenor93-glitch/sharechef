@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-ShareChef is a recipe-sharing web app built with React 18, TypeScript, Vite, and Supabase. Users enter up to 3 ingredients (plus 1 pantry add-on), get a recipe via a conversational assistant, and can share it to social platforms. The app supports multilingual output and voice input/output via the browser's Web Speech APIs.
+ShareChef is a recipe-sharing web app built with React 18, TypeScript, Vite, and Supabase. Users enter up to 3 ingredients (plus 1 pantry add-on), get a recipe via a conversational AI assistant called **ShareChef AI**, and can share it to social platforms. The app supports multilingual output and voice input/output via the browser's Web Speech APIs.
 
 ## Tech Stack
 
@@ -46,7 +46,7 @@ src/
   styles.css                # Global utility CSS (container, card, stack, row, badge, etc.)
 
   pages/
-    Home.tsx                # Main page: ingredient inputs, recipe chat, social sharing, Yummi Star
+    Home.tsx                # Main page: ingredient inputs, recipe chat, social sharing, ShareChef Star
     Login.tsx               # Email/password login via Supabase Auth
     Signup.tsx              # Email/password signup via Supabase Auth
     SavedList.tsx           # Paginated list of user's saved recipes with search + sort
@@ -65,7 +65,8 @@ src/
   voice/
     tts.ts                  # speak(text, language): Web Speech Synthesis with voice selection
     speech.ts               # startListening(onText): Web Speech Recognition (Chrome/Edge only)
-    yummiGuide.ts           # Helpers for voice readiness checks and initialization
+    sharechefAI.ts          # ShareChef AI voice helpers: readiness checks and initialization
+    yummiGuide.ts           # STALE — superseded by sharechefAI.ts, delete this file
 
   lib/
     .supabase.ts            # Supabase client singleton (note: dot-prefixed filename)
@@ -102,6 +103,8 @@ supabase/
 
 8. **Supabase client filename.** `src/lib/.supabase.ts` starts with a dot, making it a hidden file on Unix. New imports should still reference the correct path.
 
+9. **Stale `yummiGuide.ts`.** The old `src/voice/yummiGuide.ts` (originally named when the product was called "Yummi Guide") has been superseded by `src/voice/sharechefAI.ts`. The old file should be deleted.
+
 ## Core Business Rules
 
 All ingredient validation lives in `src/lib/honestRules.ts`:
@@ -121,7 +124,9 @@ Language state is stored in `localStorage` under the key `user_language`.
 
 **i18n pattern:** Each language-sensitive module has a `baseLang(language)` helper that extracts the base code from any locale string (e.g., `"he-IL"` → `"he"`). Copy maps (`copyByLang`, `recipeCopies`) are keyed on the base code and fall back to `"en"`.
 
-## Yummi Star Gamification
+## ShareChef Star Gamification
+
+The reward system is called **ShareChef Star** (previously "Yummi Star" in early development — any remaining `yummi_star_*` localStorage keys are stale naming from that era).
 
 Persisted in `localStorage`:
 
@@ -149,11 +154,15 @@ A level-up triggers a celebration message and voice announcement in the user's l
    - `youtube` → opens `youtube.com/upload`
    - `instagram` / `tiktok` → copies text to clipboard
 
+Share payload footer reads `"Made with ShareChef AI"`.
+
 ## Voice System
 
 **TTS (`src/voice/tts.ts`):** `speak(text, language)` returns a Promise. It cancels any pending speech, pads punctuation for natural pacing, selects the best available `SpeechSynthesisVoice` for the locale. Preferred voices: `Samantha`, `Allison`, `Alex`, `Victoria`, `Carmit` (Hebrew), `Adi` (Hebrew).
 
 **STT (`src/voice/speech.ts`):** `startListening(onText)` returns a `SpeechRecognition` instance (call `.start()` on it). Single-shot, non-continuous, `lang: "en-US"` hardcoded. Only works in Chromium browsers.
+
+**ShareChef AI init (`src/voice/sharechefAI.ts`):** Exports `isVoiceSupported()` and `debugStartVoice()`. `App.tsx` imports from this file.
 
 **`App.tsx` imperative handle:** `HomePage` exposes `setIngredientsFromVoice(items)` and `optimizeWithList(items)` via `forwardRef` + `useImperativeHandle` so the parent can drive the page from the DEV voice button.
 
@@ -207,6 +216,7 @@ When adding new features, resolve these blockers in order:
 
 1. Fix `Login.tsx` and `Signup.tsx` imports (`supabaseClient` → `.supabase`)
 2. Register all routes in `App.tsx` (`/login`, `/signup`, `/saved`, `/saved/:id`)
-3. Delete `src/recipe.ts` (duplicate)
-4. Implement real recipe generation in `src/api/recipe.ts` using the OpenAI key
-5. Guard or remove the "DEV: Start Voice" button in `App.tsx`
+3. Delete `src/voice/yummiGuide.ts` (replaced by `sharechefAI.ts`)
+4. Delete `src/recipe.ts` (duplicate of `src/api/recipe.ts`)
+5. Implement real recipe generation in `src/api/recipe.ts` using the OpenAI key
+6. Guard or remove the "DEV: Start Voice" button in `App.tsx`

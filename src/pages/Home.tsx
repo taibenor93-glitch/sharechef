@@ -40,7 +40,7 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
         .map((s) => s.trim())
         .find(Boolean) || "ShareChef Recipe"
     const ingredientsSummary = ingredientList.slice(0, 3).join(", ")
-    const text = `${title}\nIngredients: ${ingredientsSummary}\nMade with ShareChef / Yummi Guide`
+    const text = `${title}\nIngredients: ${ingredientsSummary}\nMade with ShareChef AI`
     return { title, text }
   }
 
@@ -150,8 +150,8 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
 
   const yummiStarLabel =
     yummiStarLevel <= 0
-      ? "Yummi Star: Locked"
-      : `Yummi Star: ${"⭐".repeat(Math.min(yummiStarLevel, 3))}`
+      ? "ShareChef Star: Locked"
+      : `ShareChef Star: ${"⭐".repeat(Math.min(yummiStarLevel, 3))}`
 
   const copyByLang: Record<
     string,
@@ -160,32 +160,32 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
     en: {
       greeting: "Tell me what you've got and I'll cook up a recipe.",
       ack: "Got it.",
-      celebration: "Nice work — you earned a Yummi Star.",
+      celebration: "Nice work — you earned a ShareChef Star.",
     },
     es: {
       greeting: "Cuéntame qué tienes y preparo una receta.",
       ack: "Entendido.",
-      celebration: "Buen trabajo: ganaste una Yummi Star.",
+      celebration: "Buen trabajo: ganaste una ShareChef Star.",
     },
     fr: {
       greeting: "Dis-moi ce que tu as et je prépare une recette.",
       ack: "C'est noté.",
-      celebration: "Bravo — tu as gagné une Yummi Star.",
+      celebration: "Bravo — tu as gagné une ShareChef Star.",
     },
     it: {
       greeting: "Dimmi cosa hai e preparo una ricetta.",
       ack: "Ricevuto.",
-      celebration: "Ottimo lavoro: hai guadagnato una Yummi Star.",
+      celebration: "Ottimo lavoro: hai guadagnato una ShareChef Star.",
     },
     pt: {
       greeting: "Me conta o que você tem e eu preparo uma receita.",
       ack: "Entendi.",
-      celebration: "Bom trabalho — você ganhou uma Yummi Star.",
+      celebration: "Bom trabalho — você ganhou uma ShareChef Star.",
     },
     he: {
       greeting: "תגיד לי מה יש לך ואני אכין לך מתכון.",
       ack: "קיבלתי.",
-      celebration: "עבודה יפה — הרווחת Yummi Star.",
+      celebration: "עבודה יפה — הרווחת ShareChef Star.",
     },
   }
 
