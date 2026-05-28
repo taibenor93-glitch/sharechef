@@ -1,0 +1,23 @@
+{
+  "name": "sharechef-ai",
+  "version": "1.0.0",
+  "description": "ShareChef AI — Voice-first cooking companion",
+  "main": "index.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "multer": "^2.1.1",
+    "openai": "^6.39.0",
+    "ws": "^8.21.0"
+  }
+}
