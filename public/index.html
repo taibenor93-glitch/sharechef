@@ -524,7 +524,7 @@ function buildRecognition() {
       addLine(userText, 'user')
       setStatus('processing', 'One moment…')
       await getChefResponse(userText)
-    }, 400)
+    }, 500)
   }
   r.onend = () => { if (isListening) stopListening() }
   r.onerror = (e) => {
