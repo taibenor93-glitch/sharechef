@@ -459,7 +459,6 @@ html, body {
 <script type="module">
 import { MicVAD } from 'https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.22/dist/bundle.min.js';
 let ws=null,vad=null,audioCtx=null,isConnected=false,isSpeaking=false,nextPlayTime=0;
-let ws=null,vad=null,audioCtx=null,isConnected=false,isSpeaking=false,nextPlayTime=0;
 function setStatus(s,t){const l={ready:'READY',listening:'LISTENING',speaking:'CHEF IS SPEAKING',thinking:'THINKING',error:'ERROR'};orb.className='orb '+s;statusLabel.textContent=l[s]||s.toUpperCase();if(t)statusText.textContent=t;}
 function addLine(t,r){const l=document.createElement('div');l.className='line '+r;l.textContent=t;transcript.appendChild(l);transcript.scrollTop=transcript.scrollHeight;}
 function showError(m){errorBanner.textContent=m;errorBanner.style.display='block';setTimeout(()=>{errorBanner.style.display='none';},5000);}
@@ -509,8 +508,6 @@ orbWrap.addEventListener('click',handleOrbClick);connectWS();
 </body>
 </html><script type="module">
 import { MicVAD } from 'https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.22/dist/bundle.min.js';
-let ws=null,vad=null,audioCtx=null,isConnected=false,isSpeaking=false,nextPlayTime=0;
-let ws=null,vad=null,audioCtx=null,isConnected=false,isSpeaking=false,nextPlayTime=0;
 function setStatus(s,t){const l={ready:'READY',listening:'LISTENING',speaking:'CHEF IS SPEAKING',thinking:'THINKING',error:'ERROR'};orb.className='orb '+s;statusLabel.textContent=l[s]||s.toUpperCase();if(t)statusText.textContent=t;}
 function addLine(t,r){const l=document.createElement('div');l.className='line '+r;l.textContent=t;transcript.appendChild(l);transcript.scrollTop=transcript.scrollHeight;}
 function showError(m){errorBanner.textContent=m;errorBanner.style.display='block';setTimeout(()=>{errorBanner.style.display='none';},5000);}
