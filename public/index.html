@@ -524,7 +524,7 @@ function buildRecognition() {
       addLine(userText, 'user')
       setStatus('processing', 'One moment…')
       await getChefResponse(userText)
-    }, 800)
+    }, 400)
   }
   r.onend = () => { if (isListening) stopListening() }
   r.onerror = (e) => {
@@ -670,7 +670,7 @@ async function getChefResponse(userMessage, isOpening = false) {
     isProcessing = false
   }
   // Auto-listen: delay 400ms so audio buffer fully clears before mic opens
-  if (autoListen) setTimeout(() => startListening(), 400)
+  if (autoListen) setTimeout(() => startListening(), 200)
 }
 
 // ── UI helpers ────────────────────────────────────────────────────────────────
