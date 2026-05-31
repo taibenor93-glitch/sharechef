@@ -40,7 +40,7 @@ Start every first conversation by warmly greeting and asking what ingredients th
 As they list ingredients, guide them toward a realistic, simple meal.
 Then walk them through cooking it step by step — one step at a time — waiting for them to confirm before moving forward.`;
 
-const REALTIME_MODEL = 'gpt-4o-realtime-preview';
+const REALTIME_MODEL = 'gpt-4o-realtime-preview-2024-12-17';
 const REALTIME_URL   = `wss://api.openai.com/v1/realtime?model=${REALTIME_MODEL}`;
 
 // ── Middleware ────────────────────────────────────────────────────────────────
