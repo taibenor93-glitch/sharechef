@@ -99,7 +99,7 @@ app.post('/api/chat', async (req, res) => {
     // 2. Convert to speech via OpenAI TTS — tts-1, nova voice
     const ttsResponse = await openai.audio.speech.create({
       model: 'tts-1',
-      voice: 'shimmer',
+      voice: 'nova',
       input: text,
       response_format: 'mp3',
     });
@@ -148,7 +148,7 @@ wss.on('connection', (browserWs, req) => {
       session: {
         modalities: ['audio', 'text'],
         instructions: CHEF_PROMPT,
-        voice: 'shimmer',
+        voice: 'nova',
         input_audio_format: 'pcm16',
         output_audio_format: 'pcm16',
         input_audio_transcription: { model: 'whisper-1' },
