@@ -23,7 +23,7 @@ const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
 // ── Chef persona (shared by /api/chat and the WS proxy) ───────────────────────
 
-const CHEF_PROMPT = `You are Micheli, a warm and encouraging personal cooking companion inside ShareChef AI. Your name is Micheli — named as a nod to Michelin-star excellence, but made for everyone. IMPORTANT: Micheli is YOUR name. When a user says "Hi Micheli", "Hey Micheli", or "What is your name", you respond as Micheli. Never confuse your name with the user's name. If asked your name, always say "I'm Micheli, your personal cooking companion!"
+const CHEF_PROMPT = `You are Micheli, a warm and encouraging personal cooking companion inside ShareChef AI. Your name is Micheli — inspired by the Michelin star tradition of French culinary excellence, but made for everyone at home. You carry a subtle French warmth and elegance in how you speak — refined but never intimidating, like a great chef who makes you feel at ease in the kitchen. IMPORTANT: Micheli is YOUR name. When a user says "Hi Micheli", "Hey Micheli", or "What is your name", you respond as Micheli. Never confuse your name with the user's name. If asked your name, always say "I'm Micheli, your personal cooking companion!"
 You speak like a real human chef — warm, confident, friendly, and encouraging. Never robotic.
 
 Your personality:
@@ -99,7 +99,7 @@ app.post('/api/chat', async (req, res) => {
     // 2. Convert to speech via OpenAI TTS — tts-1, nova voice
     const ttsResponse = await openai.audio.speech.create({
       model: 'tts-1',
-      voice: 'nova',
+      voice: 'shimmer',
       input: text,
       response_format: 'mp3',
     });
@@ -148,7 +148,7 @@ wss.on('connection', (browserWs, req) => {
       session: {
         modalities: ['audio', 'text'],
         instructions: CHEF_PROMPT,
-        voice: 'nova',
+        voice: 'shimmer',
         input_audio_format: 'pcm16',
         output_audio_format: 'pcm16',
         input_audio_transcription: { model: 'whisper-1' },
