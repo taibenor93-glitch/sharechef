@@ -458,34 +458,24 @@ html, body {
 
 <script>
 // ── State ─────────────────────────────────────────────────────────────────────
-let isListening  = false
-let isProcessing = false
-let isSpeaking   = false
-let autoListen   = false
-let isFirstTap   = true
-let recognition  = null
+let ws           = null
 let audioCtx     = null
-let currentSource = null
-let conversationHistory = []
+let micStream    = null
+let processorNode = null
+let playbackCtx  = null
+let isConnected  = false
+let isListening  = false
+let isSpeaking   = false
+let isProcessing = false
+let isFirstTap   = true
+let isTalking    = false
+let silenceTimer = null
+let audioQueue   = []
+let isPlayingAudio = false
+let currentTranscript = ''
 
-const SYSTEM_PROMPT = `You are Micheli, a warm and encouraging personal cooking companion inside ShareChef AI. Your name is Micheli. IMPORTANT: Micheli is YOUR name, not the user's name. If asked your name, always say "I'm Micheli, your personal cooking companion!"
-You speak like a real human chef — warm, confident, friendly, and encouraging. Never robotic.
-
-Your personality:
-- You speak to EVERYONE: a tired working mom, a 12-year-old cooking alone, a man trying to impress a date, a student with almost nothing in the fridge.
-- You are patient, never judgmental, always positive.
-- You guide the user step by step through cooking using ONLY the ingredients they tell you they have.
-- You NEVER tell them to buy anything. Ever. Not once.
-- Keep responses SHORT and conversational — this is voice. 2–4 sentences max per response.
-- Ask one question at a time.
-- Use simple language anyone can understand.
-- Celebrate small wins ("Perfect! That smells amazing already.")
-
-Start every first conversation by warmly greeting and asking what ingredients they have right now.
-As they list ingredients, guide them toward a realistic, simple meal.
-Then walk them through cooking it step by step — one step at a time — waiting for them to confirm before moving forward.
-
-IMPORTANT: Always respond in the same language the user is speaking. If they speak Italian, respond in Italian. If they speak Spanish, respond in Spanish. If they speak Japanese, respond in Japanese. Match their language automatically.`
+const SILENCE_THRESHOLD = 0.01
+const SILENCE_DURATION  = 400
 
 // ── DOM ───────────────────────────────────────────────────────────────────────
 const orb         = document.getElementById('orb')
@@ -496,45 +486,173 @@ const statusText  = document.getElementById('statusText')
 const transcript  = document.getElementById('transcript')
 const errorBanner = document.getElementById('errorBanner')
 
-// ── Speech Recognition ────────────────────────────────────────────────────────
-const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
-
-if (!SpeechRecognition) {
-  showError('Voice input requires Chrome or Edge. Please switch browsers.')
+// ── WebSocket ─────────────────────────────────────────────────────────────────
+function connectWS() {
+  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
+  ws = new WebSocket(`${protocol}//${location.host}/ws/realtime`)
+  ws.onopen    = () => { isConnected = true; console.log('[WS] Connected') }
+  ws.onmessage = (e) => handleRealtimeEvent(JSON.parse(e.data))
+  ws.onerror   = ()  => showError('Connection error — refresh to reconnect.')
+  ws.onclose   = ()  => { isConnected = false }
 }
 
-function buildRecognition() {
-  const r = new SpeechRecognition()
-  r.continuous     = true
-  r.interimResults = true
-  r.lang           = navigator.language || 'en-US'
-  let finalTranscript = ''
-  let silenceTimer = null
-  r.onresult = (e) => {
-    if (isProcessing) return
-    for (let i = e.resultIndex; i < e.results.length; i++) {
-      if (e.results[i].isFinal) {
-        finalTranscript += e.results[i][0].transcript
+// ── Realtime event handler ────────────────────────────────────────────────────
+function handleRealtimeEvent(msg) {
+  switch (msg.type) {
+    case 'response.audio.delta':
+      queueAudio(msg.delta)
+      break
+    case 'response.audio_transcript.delta':
+      currentTranscript += msg.delta
+      break
+    case 'response.audio_transcript.done':
+      if (currentTranscript) { addLine(currentTranscript, 'chef'); currentTranscript = '' }
+      break
+    case 'response.done':
+      isSpeaking = false
+      isProcessing = false
+      orb.classList.remove('speaking')
+      orbWrap.classList.remove('speaking')
+      orbHint.textContent = 'Tap to speak'
+      setStatus('ready', 'Your turn — tap the mic')
+      setTimeout(() => { if (!isSpeaking && !isProcessing) startListening() }, 200)
+      break
+    case 'error':
+      console.error('[Realtime]', msg.error)
+      showError(msg.error?.message || 'Realtime API error')
+      isProcessing = false; isSpeaking = false
+      setStatus('ready', 'Tap the mic to try again')
+      break
+  }
+}
+
+// ── Audio playback (PCM16) ────────────────────────────────────────────────────
+function queueAudio(base64Chunk) {
+  audioQueue.push(base64Chunk)
+  if (!isPlayingAudio) processAudioQueue()
+}
+
+function processAudioQueue() {
+  if (audioQueue.length === 0) { isPlayingAudio = false; return }
+  isPlayingAudio = true
+  isSpeaking = true
+  orb.classList.add('speaking')
+  orbWrap.classList.add('speaking')
+  orbHint.textContent = 'Tap to interrupt'
+  setStatus('speaking', 'Chef is speaking…')
+
+  if (!playbackCtx) playbackCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 })
+
+  const chunk  = audioQueue.shift()
+  const binary = atob(chunk)
+  const bytes  = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+
+  const samples = new Float32Array(bytes.length / 2)
+  const view    = new DataView(bytes.buffer)
+  for (let i = 0; i < samples.length; i++) samples[i] = view.getInt16(i * 2, true) / 32768
+
+  const buffer = playbackCtx.createBuffer(1, samples.length, 24000)
+  buffer.getChannelData(0).set(samples)
+  const source = playbackCtx.createBufferSource()
+  source.buffer = buffer
+  source.connect(playbackCtx.destination)
+  source.onended = processAudioQueue
+  source.start()
+}
+
+function stopAudio() {
+  audioQueue = []; isPlayingAudio = false; isSpeaking = false
+  orb.classList.remove('speaking'); orbWrap.classList.remove('speaking')
+  orbHint.textContent = 'Tap to speak'
+  setStatus('ready', 'Your turn — tap the mic')
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'response.cancel' }))
+    ws.send(JSON.stringify({ type: 'input_audio_buffer.clear' }))
+  }
+}
+
+// ── Mic capture + VAD ─────────────────────────────────────────────────────────
+async function startListening() {
+  if (isListening || isProcessing) return
+  try {
+    if (!micStream) micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 })
+    if (audioCtx.state === 'suspended') await audioCtx.resume()
+
+    const source = audioCtx.createMediaStreamSource(micStream)
+    processorNode = audioCtx.createScriptProcessor(4096, 1, 1)
+
+    processorNode.onaudioprocess = (e) => {
+      if (!isListening) return
+      const input = e.inputBuffer.getChannelData(0)
+
+      // RMS VAD
+      let sum = 0
+      for (let i = 0; i < input.length; i++) sum += input[i] * input[i]
+      const rms = Math.sqrt(sum / input.length)
+      if (rms > SILENCE_THRESHOLD) {
+        if (!isTalking) { isTalking = true }
+        clearTimeout(silenceTimer)
+        silenceTimer = setTimeout(onSilenceDetected, SILENCE_DURATION)
+      }
+
+      // Stream PCM16 to server
+      const pcm16  = float32ToPcm16(input)
+      const base64 = arrayBufferToBase64(pcm16.buffer)
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'input_audio_buffer.append', audio: base64 }))
       }
     }
-    clearTimeout(silenceTimer)
-    silenceTimer = setTimeout(async () => {
-      const userText = finalTranscript.trim()
-      finalTranscript = ''
-      if (!userText) return
-      stopListening()
-      addLine(userText, 'user')
-      setStatus('processing', 'One moment…')
-      await getChefResponse(userText)
-    }, 800)
-  }
-  r.onend = () => { if (isListening) stopListening() }
-  r.onerror = (e) => {
-    stopListening()
-    if (e.error !== 'no-speech') showError(`Mic error: ${e.error}`)
+
+    source.connect(processorNode)
+    processorNode.connect(audioCtx.destination)
+
+    isListening = true; isTalking = false
+    orb.classList.add('listening'); orbWrap.classList.add('listening')
+    orbHint.style.opacity = '0'
+    setStatus('listening', "I'm listening…")
+
+  } catch (err) {
+    showError('Mic access denied. Please allow microphone.')
     setStatus('ready', 'Tap the mic to try again')
   }
-  return r
+}
+
+function stopListening() {
+  isListening = false; isTalking = false
+  clearTimeout(silenceTimer)
+  if (processorNode) { processorNode.disconnect(); processorNode = null }
+  orb.classList.remove('listening'); orbWrap.classList.remove('listening')
+  orbHint.style.opacity = '1'
+}
+
+function onSilenceDetected() {
+  if (!isListening || !isTalking) return
+  stopListening()
+  isProcessing = true
+  setStatus('processing', 'One moment…')
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'input_audio_buffer.commit' }))
+    ws.send(JSON.stringify({ type: 'response.create' }))
+  }
+}
+
+// ── Audio helpers ─────────────────────────────────────────────────────────────
+function float32ToPcm16(f32) {
+  const pcm = new Int16Array(f32.length)
+  for (let i = 0; i < f32.length; i++) {
+    const s = Math.max(-1, Math.min(1, f32[i]))
+    pcm[i] = s < 0 ? s * 0x8000 : s * 0x7FFF
+  }
+  return pcm
+}
+
+function arrayBufferToBase64(buf) {
+  const bytes = new Uint8Array(buf)
+  let bin = ''
+  for (let i = 0; i < bytes.byteLength; i++) bin += String.fromCharCode(bytes[i])
+  return btoa(bin)
 }
 
 // ── Orb click ─────────────────────────────────────────────────────────────────
@@ -542,7 +660,6 @@ orb.addEventListener('click', handleOrbClick)
 
 async function handleOrbClick() {
   hideError()
-
   if (isSpeaking)   { stopAudio(); return }
   if (isListening)  { stopListening(); return }
   if (isProcessing) return
@@ -551,138 +668,25 @@ async function handleOrbClick() {
     isFirstTap = false
     orb.classList.add('processing')
     setStatus('processing', 'Your chef is warming up…')
-    await getChefResponse(null, true)
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'input_audio_buffer.clear' }))
+      ws.send(JSON.stringify({ type: 'response.create' }))
+    } else {
+      setTimeout(() => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'response.create' }))
+        }
+      }, 1000)
+    }
     orb.classList.remove('processing')
     return
   }
-
   startListening()
-}
-
-// ── Listening ─────────────────────────────────────────────────────────────────
-function startListening() {
-  if (!SpeechRecognition) return
-  recognition = buildRecognition()
-  isListening = true
-  orb.classList.add('listening')
-  orbWrap.classList.add('listening')
-  orbHint.style.opacity = '0'
-  setStatus('listening', 'I\'m listening…')
-  recognition.start()
-}
-
-function stopListening() {
-  isListening = false
-  orb.classList.remove('listening')
-  orbWrap.classList.remove('listening')
-  orbHint.style.opacity = '1'
-  try { recognition?.stop() } catch (_) {}
-}
-
-// ── Audio playback ────────────────────────────────────────────────────────────
-async function playAudioBase64(base64) {
-  if (!audioCtx) {
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)()
-  }
-  if (audioCtx.state === 'suspended') await audioCtx.resume()
-
-  const binary = atob(base64)
-  const bytes  = new Uint8Array(binary.length)
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
-
-  const decoded = await audioCtx.decodeAudioData(bytes.buffer)
-
-  return new Promise((resolve) => {
-    currentSource        = audioCtx.createBufferSource()
-    currentSource.buffer = decoded
-    currentSource.connect(audioCtx.destination)
-    currentSource.onended = () => { currentSource = null; resolve() }
-    currentSource.start(0)
-  })
-}
-
-function stopAudio() {
-  try { currentSource?.stop() } catch (_) {}
-  currentSource = null
-  isSpeaking    = false
-  orb.classList.remove('speaking')
-  orbWrap.classList.remove('speaking')
-  orbHint.textContent = 'Tap to speak'
-  setStatus('ready', 'Your turn — tap the mic')
-}
-
-// ── Chat API ──────────────────────────────────────────────────────────────────
-async function getChefResponse(userMessage, isOpening = false) {
-  isProcessing = true
-
-  try {
-    if (isOpening) {
-      conversationHistory.push({ role: 'user', content: 'Hello, I just opened the app.' })
-    } else {
-      conversationHistory.push({ role: 'user', content: userMessage })
-    }
-
-    const res = await fetch('/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        messages: conversationHistory,
-        systemPrompt: SYSTEM_PROMPT,
-      }),
-    })
-
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}))
-      throw new Error(err.error || `Server error ${res.status}`)
-    }
-
-    const { text, audio } = await res.json()
-
-    conversationHistory.push({ role: 'assistant', content: text })
-    addLine(text, 'chef')
-    setStatus('speaking', text)
-
-    isSpeaking = true
-    orb.classList.add('speaking')
-    orbWrap.classList.add('speaking')
-    orbHint.textContent = 'Tap to interrupt'
-
-    await playAudioBase64(audio)
-
-    // Flag for auto-listen — actual start happens after finally clears isProcessing
-    if (isSpeaking) {
-      isSpeaking = false
-      orb.classList.remove('speaking')
-      orbWrap.classList.remove('speaking')
-      autoListen = true
-    }
-
-  } catch (err) {
-    orb.classList.remove('processing', 'listening', 'speaking')
-    orbWrap.classList.remove('listening', 'speaking')
-    showError(
-      err.message.includes('429') || err.message.includes('quota')
-        ? 'OpenAI quota reached. Check your API plan.'
-        : err.message.includes('401') || err.message.includes('key')
-        ? 'API key issue. Check your .env file.'
-        : err.message
-    )
-    setStatus('ready', 'Tap the mic to try again')
-  } finally {
-    isProcessing = false
-  }
-  // Auto-listen: delay 400ms so audio buffer fully clears before mic opens
-  if (autoListen) setTimeout(() => startListening(), 400)
 }
 
 // ── UI helpers ────────────────────────────────────────────────────────────────
 function setStatus(state, text) {
-  const labels = {
-    listening:  '● Listening',
-    processing: '◌ Thinking',
-    speaking:   '♪ Chef speaking',
-    ready:      'Chef is ready',
-  }
+  const labels = { listening: '● Listening', processing: '◌ Thinking', speaking: '♪ Chef speaking', ready: 'Chef is ready' }
   statusLabel.classList.add('visible')
   statusLabel.textContent = labels[state] || 'Chef is ready'
   statusText.classList.remove('visible')
@@ -704,10 +708,8 @@ function showError(msg) { errorBanner.textContent = msg; errorBanner.classList.a
 function hideError()    { errorBanner.classList.remove('visible') }
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
-setTimeout(() => {
-  statusLabel.classList.add('visible')
-  statusText.classList.add('visible')
-}, 800)
+connectWS()
+setTimeout(() => { statusLabel.classList.add('visible'); statusText.classList.add('visible') }, 800)
 
 // ── Screen recorder ───────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
