@@ -118,8 +118,6 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
     arabic: "ar",
     ar: "ar",
     hindi: "hi",
-    hindi: "hi",
-    japanese: "ja",
     japanese: "ja",
     chinese: "zh-CN",
     中文: "zh-CN",
