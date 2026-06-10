@@ -103,7 +103,7 @@ export function SavedListPage() {
                       {(r.tags ?? []).slice(0, 4).map(t => <span key={t} className="badge">#{t}</span>)}
                     </div>
                   </div>
-                  <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}><div className="muted" style={{ fontSize: 14 }}>Open →</div>{r.created_at && <div className="muted" style={{ fontSize: 11 }}>{new Date(r.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}</div>}</div>
+                  <div className="muted" style={{ fontSize: 14 }}>Open →</div>
                 </div>
               </Link>
             ))}

@@ -18,6 +18,8 @@ export function LoginPage() {
     setBusy(false)
 
     if (error) return setError(error.message)
+    localStorage.setItem('lastLogin', new Date().toLocaleString())
+
 
     nav('/', { replace: true })
   }
@@ -29,6 +31,10 @@ export function LoginPage() {
           <div className="h1">Login</div>
           <div className="muted">Use your email + password.</div>
         </div>
+        {localStorage.getItem('lastLogin') && (
+  <div className="muted" style={{ fontSize: 12 }}>Last login: {localStorage.getItem('lastLogin')}</div>
+)}
+
 
         <form className="stack" onSubmit={onSubmit}>
           <div className="stack">
