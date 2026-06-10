@@ -1,5 +1,5 @@
-export function startYummiGuide(): void {
-  console.log("Yummi Guide initialized")
+export function startMicheliGuide(): void {
+  console.log("Micheli initialized")
 }
 
 export function isVoiceSupported(): boolean {
@@ -12,5 +12,5 @@ export function debugStartVoice(): void {
     return
   }
 
-  startYummiGuide()
+  startMicheliGuide()
 }

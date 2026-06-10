@@ -24,7 +24,7 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
   const [chatInput, setChatInput] = useState("")
   const hasGreeted = useRef(false)
   const [lastIngredients, setLastIngredients] = useState<string[]>([])
-  const [yummiStarLevel, setYummiStarLevel] = useState(0)
+  const [micheliStarLevel, setMicheliStarLevel] = useState(0)
   const [userLanguage, setUserLanguage] = useState<SupportedLanguage>("en")
   const [customLanguage, setCustomLanguage] = useState("")
 
@@ -40,7 +40,7 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
         .map((s) => s.trim())
         .find(Boolean) || "ShareChef Recipe"
     const ingredientsSummary = ingredientList.slice(0, 3).join(", ")
-    const text = `${title}\nIngredients: ${ingredientsSummary}\nMade with ShareChef / Yummi Guide`
+    const text = `${title}\nIngredients: ${ingredientsSummary}\nMade with ShareChef / Micheli`
     return { title, text }
   }
 
@@ -84,16 +84,16 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
     try {
       const storage = typeof window !== "undefined" ? window.localStorage : undefined
       const current = Number.parseInt(storage?.getItem?.("recipe_cooked_count") ?? "0", 10)
-      const currentLevel = Number.parseInt(storage?.getItem?.("yummi_star_level") ?? "0", 10)
+      const currentLevel = Number.parseInt(storage?.getItem?.("micheli_star_level") ?? "0", 10)
       const next = Number.isFinite(current) ? current + 1 : 1
       storage?.setItem?.("recipe_cooked_count", String(next))
       const level = next >= 100 ? 3 : next >= 50 ? 2 : next >= 20 ? 1 : 0
       if (level > 0) {
-        storage?.setItem?.("yummi_star_unlocked", "true")
+        storage?.setItem?.("micheli_star_unlocked", "true")
       }
-      storage?.setItem?.("yummi_star_level", String(level))
+      storage?.setItem?.("micheli_star_level", String(level))
       const leveledUp = Number.isFinite(currentLevel) ? level > currentLevel : level > 0
-      setYummiStarLevel(level)
+      setMicheliStarLevel(level)
       return { level, leveledUp }
     } catch (err) {
       console.warn("Could not persist recipe_cooked_count", err)
@@ -148,10 +148,10 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
     return (language ?? "en").split(/[-_]/)[0].toLowerCase()
   }
 
-  const yummiStarLabel =
-    yummiStarLevel <= 0
-      ? "Yummi Star: Locked"
-      : `Yummi Star: ${"⭐".repeat(Math.min(yummiStarLevel, 3))}`
+  const micheliStarLabel =
+    micheliStarLevel <= 0
+      ? "Micheli Star: Locked"
+      : `Micheli Star: ${"⭐".repeat(Math.min(micheliStarLevel, 3))}`
 
   const copyByLang: Record<
     string,
@@ -160,32 +160,32 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
     en: {
       greeting: "Tell me what you've got and I'll cook up a recipe.",
       ack: "Got it.",
-      celebration: "Nice work — you earned a Yummi Star.",
+      celebration: "Nice work — you earned a Micheli Star.",
     },
     es: {
       greeting: "Cuéntame qué tienes y preparo una receta.",
       ack: "Entendido.",
-      celebration: "Buen trabajo: ganaste una Yummi Star.",
+      celebration: "Buen trabajo: ganaste una Micheli Star.",
     },
     fr: {
       greeting: "Dis-moi ce que tu as et je prépare une recette.",
       ack: "C'est noté.",
-      celebration: "Bravo — tu as gagné une Yummi Star.",
+      celebration: "Bravo — tu as gagné une Micheli Star.",
     },
     it: {
       greeting: "Dimmi cosa hai e preparo una ricetta.",
       ack: "Ricevuto.",
-      celebration: "Ottimo lavoro: hai guadagnato una Yummi Star.",
+      celebration: "Ottimo lavoro: hai guadagnato una Micheli Star.",
     },
     pt: {
       greeting: "Me conta o que você tem e eu preparo uma receita.",
       ack: "Entendi.",
-      celebration: "Bom trabalho — você ganhou uma Yummi Star.",
+      celebration: "Bom trabalho — você ganhou uma Micheli Star.",
     },
     he: {
       greeting: "תגיד לי מה יש לך ואני אכין לך מתכון.",
       ack: "קיבלתי.",
-      celebration: "עבודה יפה — הרווחת Yummi Star.",
+      celebration: "עבודה יפה — הרווחת Micheli Star.",
     },
   }
 
@@ -261,10 +261,10 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
     try {
       const storedLevel =
         typeof window !== "undefined"
-          ? Number.parseInt(window.localStorage.getItem("yummi_star_level") ?? "0", 10)
+          ? Number.parseInt(window.localStorage.getItem("micheli_star_level") ?? "0", 10)
           : 0
       if (Number.isFinite(storedLevel)) {
-        setYummiStarLevel(storedLevel)
+        setMicheliStarLevel(storedLevel)
       }
     } catch {
       /* ignore */
@@ -324,9 +324,7 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
     const reply = pantryNote ? `${pantryNote}\n\n${recipe}` : recipe
 
     const generatedAt = new Date().toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" })
-    const replyWithTimestamp = reply + "
-
-_Generated on " + generatedAt + "_"
+    const replyWithTimestamp = reply + "\n\n_Generated on " + generatedAt + "_"
     setResult(replyWithTimestamp)
     addMessage("assistant", replyWithTimestamp)
     setLastIngredients(runList)
@@ -366,7 +364,7 @@ _Generated on " + generatedAt + "_"
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
         <h1 style={{ margin: 0 }}>ShareChef</h1>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ fontSize: 12, color: "#5c677d" }}>{yummiStarLabel}</div>
+          <div style={{ fontSize: 12, color: "#5c677d" }}>{micheliStarLabel}</div>
           <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#5c677d" }}>
             <span>Language</span>
             <select
