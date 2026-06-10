@@ -15,7 +15,7 @@ type ChatMessage = {
 
 type SharePlatform = "facebook" | "instagram" | "tiktok" | "youtube"
 const supportedLanguages = ["en", "es", "fr", "it", "pt"] as const
-type SupportedLanguage = (typeof supportedLanguages)[number] | string
+type SupportedLanguage = (typeof supportedLanguages)[number]
 
 export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref) {
   const [ingredients, setIngredients] = useState({ one: "", two: "", three: "" })
