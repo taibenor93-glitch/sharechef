@@ -321,10 +321,8 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
     const pantryNote = translatePantryNote(validation.pantryAddOn, userLanguage)
     const reply = pantryNote ? `${pantryNote}\n\n${recipe}` : recipe
 
-    const generatedAt = new Date().toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" })
-    const replyWithTimestamp = reply + "\n\n_Generated on " + generatedAt + "_"
-    setResult(replyWithTimestamp)
-    addMessage("assistant", replyWithTimestamp)
+    setResult(reply)
+    addMessage("assistant", reply)
     setLastIngredients(runList)
     const progress = incrementCookedCount()
     incrementMetric("recipe_view_count")
