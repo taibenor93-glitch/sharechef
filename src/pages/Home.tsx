@@ -15,7 +15,7 @@ type ChatMessage = {
 
 type SharePlatform = "facebook" | "instagram" | "tiktok" | "youtube"
 const supportedLanguages = ["en", "es", "fr", "it", "pt"] as const
-type SupportedLanguage = (typeof supportedLanguages)[number]
+type SupportedLanguage = (typeof supportedLanguages)[number] | string | string
 
 export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref) {
   const [ingredients, setIngredients] = useState({ one: "", two: "", three: "" })
@@ -25,7 +25,7 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
   const hasGreeted = useRef(false)
   const [lastIngredients, setLastIngredients] = useState<string[]>([])
   const [micheliStarLevel, setMicheliStarLevel] = useState(0)
-  const [userLanguage, setUserLanguage] = useState<SupportedLanguage>("en")
+  const [userLanguage, setUserLanguage] = useState<string>("en")
   const [customLanguage, setCustomLanguage] = useState("")
 
   const maxIngredients = 4
@@ -275,7 +275,7 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
         typeof window !== "undefined" ? window.localStorage.getItem("user_language") : null
       const normalized = storedLanguage || "en"
       setUserLanguage(normalized)
-      if (normalized && !supportedLanguages.includes(normalized as SupportedLanguage)) {
+      if (normalized && !(supportedLanguages as readonly string[]).includes(normalized)) {
         setCustomLanguage(normalized)
       }
     } catch {
@@ -364,7 +364,7 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
           <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#5c677d" }}>
             <span>Language</span>
             <select
-              value={supportedLanguages.includes(userLanguage as SupportedLanguage) ? userLanguage : "__custom"}
+              value={(supportedLanguages as readonly string[]).includes(userLanguage) ? userLanguage : "__custom"}
               onChange={(e) => {
                 const next = e.target.value as SupportedLanguage | "__custom"
                 if (next === "__custom") {
@@ -388,7 +388,7 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
               <option value="pt">Português (PT)</option>
               <option value="__custom">More languages…</option>
             </select>
-            {(!supportedLanguages.includes(userLanguage as SupportedLanguage) || userLanguage === "__custom") && (
+            {(!(supportedLanguages as readonly string[]).includes(userLanguage) || userLanguage === "__custom") && (
               <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
                 <input
                   placeholder="e.g., hi-IN or zh-CN"

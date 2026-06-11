@@ -14,7 +14,7 @@ export function startListening(onText: (text: string) => void): any {
 
   recognition.onresult = (event: any) => {
     const transcript = Array.from(event.results as Iterable<SpeechRecognitionResult>)
-      .flatMap((result) => Array.from(result as Iterable<SpeechRecognitionAlternative>))
+      .flatMap((result) => Array.from(result as Iterable<any>))
       .filter((alt) => alt.isFinal)
       .map((alt) => alt.transcript)
       .join(" ")
