@@ -541,7 +541,7 @@ function processAudioQueue() {
   orbHint.textContent = 'Tap to interrupt'
   setStatus('speaking', 'Chef is speaking…')
 
-  if (!playbackCtx) playbackCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 })
+  if (!playbackCtx) return  // not yet initialized by user gesture; drop chunk
 
   const chunk  = audioQueue.shift()
   const binary = atob(chunk)
@@ -577,29 +577,34 @@ async function startListening() {
   if (isListening || isProcessing) return
   try {
     if (!micStream) micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
-    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 })
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 })
+      await audioCtx.audioWorklet.addModule('/audio-processor.js')
+    }
     if (audioCtx.state === 'suspended') await audioCtx.resume()
 
     const source = audioCtx.createMediaStreamSource(micStream)
-    processorNode = audioCtx.createScriptProcessor(4096, 1, 1)
+    processorNode = new AudioWorkletNode(audioCtx, 'pcm-audio-processor')
 
-    processorNode.onaudioprocess = (e) => {
+    processorNode.port.onmessage = (event) => {
       if (!isListening) return
-      const input = e.inputBuffer.getChannelData(0)
+      const int16 = new Int16Array(event.data)
 
-      // RMS VAD
+      // RMS VAD from Int16 samples
       let sum = 0
-      for (let i = 0; i < input.length; i++) sum += input[i] * input[i]
-      const rms = Math.sqrt(sum / input.length)
+      for (let i = 0; i < int16.length; i++) {
+        const s = int16[i] / 32768
+        sum += s * s
+      }
+      const rms = Math.sqrt(sum / int16.length)
       if (rms > SILENCE_THRESHOLD) {
-        if (!isTalking) { isTalking = true }
+        if (!isTalking) isTalking = true
         clearTimeout(silenceTimer)
         silenceTimer = setTimeout(onSilenceDetected, SILENCE_DURATION)
       }
 
       // Stream PCM16 to server
-      const pcm16  = float32ToPcm16(input)
-      const base64 = arrayBufferToBase64(pcm16.buffer)
+      const base64 = arrayBufferToBase64(event.data)
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'input_audio_buffer.append', audio: base64 }))
       }
@@ -622,7 +627,7 @@ async function startListening() {
 function stopListening() {
   isListening = false; isTalking = false
   clearTimeout(silenceTimer)
-  if (processorNode) { processorNode.disconnect(); processorNode = null }
+  if (processorNode) { processorNode.port.onmessage = null; processorNode.disconnect(); processorNode = null }
   orb.classList.remove('listening'); orbWrap.classList.remove('listening')
   orbHint.style.opacity = '1'
 }
@@ -639,15 +644,6 @@ function onSilenceDetected() {
 }
 
 // ── Audio helpers ─────────────────────────────────────────────────────────────
-function float32ToPcm16(f32) {
-  const pcm = new Int16Array(f32.length)
-  for (let i = 0; i < f32.length; i++) {
-    const s = Math.max(-1, Math.min(1, f32[i]))
-    pcm[i] = s < 0 ? s * 0x8000 : s * 0x7FFF
-  }
-  return pcm
-}
-
 function arrayBufferToBase64(buf) {
   const bytes = new Uint8Array(buf)
   let bin = ''
@@ -660,6 +656,11 @@ orb.addEventListener('click', handleOrbClick)
 
 async function handleOrbClick() {
   hideError()
+
+  // iOS requires AudioContext creation + resume inside a user gesture
+  if (!playbackCtx) playbackCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 })
+  if (playbackCtx.state === 'suspended') await playbackCtx.resume()
+
   if (isSpeaking)   { stopAudio(); return }
   if (isListening)  { stopListening(); return }
   if (isProcessing) return
@@ -714,6 +715,12 @@ setTimeout(() => { statusLabel.classList.add('visible'); statusText.classList.ad
 // ── Screen recorder ───────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   const recBtn       = document.getElementById('recBtn')
+
+  // Screen capture API not available on iOS Safari — hide the button entirely
+  if (!navigator.mediaDevices?.getDisplayMedia) {
+    recBtn.style.display = 'none'
+    return
+  }
   const shareOverlay = document.getElementById('shareOverlay')
   const shareCancel  = document.getElementById('shareCancel')
   const shareDownload  = document.getElementById('shareDownload')
