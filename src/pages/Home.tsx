@@ -2,6 +2,7 @@ import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState }
 import { generateRecipe } from "../api/recipe"
 import { validateIngredients } from "../lib/honestRules"
 import { speak } from "../voice/tts"
+import { RealtimeVoice, type VoiceStatus } from "../voice/realtimeVoice"
 
 export type HomePageHandle = {
   setIngredientsFromVoice: (items: string[]) => void
@@ -17,6 +18,24 @@ type SharePlatform = "facebook" | "instagram" | "tiktok" | "youtube"
 const supportedLanguages = ["en", "es", "fr", "it", "pt"] as const
 type SupportedLanguage = (typeof supportedLanguages)[number] | string | string
 
+const STATUS_LABEL: Record<VoiceStatus, string> = {
+  idle:        'Tap to talk to Micheli',
+  connecting:  'Connecting…',
+  ready:       'Tap to speak',
+  listening:   '● Listening…',
+  processing:  '◌ Thinking…',
+  speaking:    '♪ Micheli is speaking',
+}
+
+const ORB_COLOR: Record<VoiceStatus, string> = {
+  idle:        '#2C1A0E',
+  connecting:  '#2C1A0E',
+  ready:       '#2C1A0E',
+  listening:   '#C4593A',
+  processing:  '#2C1A0E',
+  speaking:    '#2A2010',
+}
+
 export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref) {
   const [ingredients, setIngredients] = useState({ one: "", two: "", three: "" })
   const [result, setResult] = useState("")
@@ -27,6 +46,14 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
   const [micheliStarLevel, setMicheliStarLevel] = useState(0)
   const [userLanguage, setUserLanguage] = useState<string>("en")
   const [customLanguage, setCustomLanguage] = useState("")
+
+  // ── Realtime voice ────────────────────────────────────────────────────────
+  const voiceRef    = useRef<RealtimeVoice | null>(null)
+  const firstTap    = useRef(true)
+  const [voiceStatus,    setVoiceStatus]    = useState<VoiceStatus>('idle')
+  const [voiceLines,     setVoiceLines]     = useState<Array<{ role: 'user' | 'chef'; text: string }>>([])
+  const [voiceError,     setVoiceError]     = useState('')
+  const [voiceActive,    setVoiceActive]    = useState(false)
 
   const maxIngredients = 4
 
@@ -355,6 +382,54 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
     [runAssistant]
   )
 
+  // ── Voice orb handler ────────────────────────────────────────────────────
+  async function handleOrbClick() {
+    setVoiceError('')
+
+    if (!voiceRef.current) {
+      voiceRef.current = new RealtimeVoice({
+        onStatus: (s) => setVoiceStatus(s),
+        onTranscript: (text, role) =>
+          setVoiceLines((prev) => [...prev.slice(-19), { role, text }]),
+        onError: (msg) => setVoiceError(msg),
+      })
+    }
+
+    const voice = voiceRef.current
+
+    // iOS: AudioContext must be created + resumed inside a user gesture
+    await voice.unlockAudio()
+
+    if (!voiceActive) {
+      setVoiceActive(true)
+      voice.connect()
+      // Greeting is triggered by the server on WS open; wait for ready then listen
+      return
+    }
+
+    if (voiceStatus === 'speaking')   { voice.stopAudio(); return }
+    if (voiceStatus === 'listening')  { voice.stopListening(); return }
+    if (voiceStatus === 'processing' || voiceStatus === 'connecting') return
+
+    if (voiceStatus === 'ready') {
+      if (firstTap.current) {
+        firstTap.current = false
+        voice.triggerGreeting()
+      } else {
+        void voice.startListening()
+      }
+    }
+  }
+
+  function handleOrbDisconnect() {
+    voiceRef.current?.disconnect()
+    voiceRef.current = null
+    setVoiceActive(false)
+    setVoiceStatus('idle')
+    setVoiceLines([])
+    firstTap.current = true
+  }
+
   return (
     <main style={{ padding: 40, maxWidth: 900, margin: "0 auto" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
@@ -421,6 +496,89 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
           </div>
         </div>
       </div>
+
+      {/* ── Micheli voice orb ─────────────────────────────────────────────── */}
+      <section style={{ margin: '32px 0', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
+        <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          {/* ripple rings */}
+          {(voiceStatus === 'listening' || voiceStatus === 'speaking') && (
+            <>
+              <div style={{ position: 'absolute', borderRadius: '50%', border: `1.5px solid ${voiceStatus === 'speaking' ? '#E8B84B' : '#C4593A'}`, width: 140, height: 140, animation: 'ripple 2s 0s ease-out infinite', opacity: 0 }} />
+              <div style={{ position: 'absolute', borderRadius: '50%', border: `1.5px solid ${voiceStatus === 'speaking' ? '#E8B84B' : '#C4593A'}`, width: 180, height: 180, animation: 'ripple 2s 0.5s ease-out infinite', opacity: 0 }} />
+            </>
+          )}
+          <button
+            onClick={handleOrbClick}
+            aria-label={STATUS_LABEL[voiceStatus]}
+            style={{
+              width: 100, height: 100, borderRadius: '50%',
+              background: ORB_COLOR[voiceStatus],
+              border: `1.5px solid ${voiceStatus === 'speaking' ? '#E8B84B' : voiceStatus === 'listening' ? '#C4593A' : 'rgba(196,89,58,0.4)'}`,
+              cursor: voiceStatus === 'processing' || voiceStatus === 'connecting' ? 'default' : 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              boxShadow: voiceStatus === 'listening'
+                ? '0 0 40px rgba(196,89,58,0.4), 0 16px 40px rgba(0,0,0,0.3)'
+                : voiceStatus === 'speaking'
+                ? '0 0 40px rgba(232,184,75,0.3), 0 16px 40px rgba(0,0,0,0.3)'
+                : '0 16px 40px rgba(0,0,0,0.2)',
+              transition: 'all 0.3s ease',
+              WebkitTapHighlightColor: 'transparent',
+            }}
+          >
+            {voiceStatus === 'speaking' ? (
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
+                {[2,5,9,13,17,20,23].map((x, i) => (
+                  <rect key={i} x={x} y="4" width="2" height="16" rx="1" fill="#E8B84B"
+                    style={{ animation: `wavebar 0.8s ${i * 0.1}s ease-in-out infinite`, transformOrigin: 'center' }} />
+                ))}
+              </svg>
+            ) : (
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={voiceStatus === 'listening' ? 'white' : '#C4593A'} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                <line x1="12" y1="19" x2="12" y2="23"/>
+                <line x1="8"  y1="23" x2="16" y2="23"/>
+              </svg>
+            )}
+          </button>
+        </div>
+
+        <p style={{ margin: 0, fontSize: 12, letterSpacing: 2, textTransform: 'uppercase', color: voiceStatus === 'listening' ? '#C4593A' : voiceStatus === 'speaking' ? '#E8B84B' : '#888', fontFamily: 'monospace' }}>
+          {STATUS_LABEL[voiceStatus]}
+        </p>
+
+        {voiceError && (
+          <p style={{ margin: 0, fontSize: 12, color: '#C4593A', textAlign: 'center', maxWidth: 320 }}>{voiceError}</p>
+        )}
+
+        {voiceLines.length > 0 && (
+          <div style={{ width: '100%', maxWidth: 480, display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 160, overflowY: 'auto' }}>
+            {voiceLines.map((line, i) => (
+              <div key={i} style={{
+                fontSize: 13, lineHeight: 1.5, padding: '4px 0 4px 10px',
+                borderLeft: `2px solid ${line.role === 'chef' ? '#E8B84B' : '#C4593A'}`,
+                color: line.role === 'chef' ? 'rgba(30,20,8,0.75)' : 'rgba(30,20,8,0.5)',
+                fontStyle: line.role === 'chef' ? 'italic' : 'normal',
+              }}>
+                {line.role === 'chef' ? `Micheli: ${line.text}` : `You: ${line.text}`}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {voiceActive && (
+          <button onClick={handleOrbDisconnect} style={{ fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', background: 'none', border: 'none', color: '#aaa', cursor: 'pointer', fontFamily: 'monospace' }}>
+            End session
+          </button>
+        )}
+      </section>
+
+      <style>{`
+        @keyframes ripple { 0% { transform: scale(0.9); opacity: 0.6; } 100% { transform: scale(1.2); opacity: 0; } }
+        @keyframes wavebar { 0%, 100% { transform: scaleY(0.4); } 50% { transform: scaleY(1); } }
+      `}</style>
+
+      <hr style={{ border: 'none', borderTop: '1px solid #e6e8ef', margin: '8px 0 24px' }} />
 
       <input
         placeholder="Ingredient 1"
