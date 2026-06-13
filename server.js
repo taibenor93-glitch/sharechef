@@ -77,7 +77,7 @@ Never suggest buying additional ingredients.`,
       ],
     })
     res.json(JSON.parse(completion.choices[0].message.content || '{}'))
-  } catch (err: any) {
+  } catch (err) {
     res.status(err.status || 500).json({ error: err.message })
   }
 })
@@ -102,7 +102,7 @@ app.post('/chat', async (req, res) => {
       }),
     })
     res.status(200).json(await response.json())
-  } catch (err: any) {
+  } catch (err) {
     res.status(500).json({ error: 'Chat request failed: ' + err.message })
   }
 })
@@ -118,7 +118,7 @@ app.get('/health', (_req, res) =>
 const wss = new WebSocketServer({ server, path: '/ws/realtime' })
 
 wss.on('connection', (browserWs, req) => {
-  console.log(`[WS] Browser connected from ${(req.socket as any).remoteAddress}`)
+  console.log(`[WS] Browser connected from ${req.socket.remoteAddress}`)
 
   if (!process.env.OPENAI_API_KEY) {
     browserWs.send(JSON.stringify({ type: 'error', error: { message: 'OPENAI_API_KEY not set on server.' } }))
@@ -131,7 +131,7 @@ wss.on('connection', (browserWs, req) => {
   })
 
   let sessionReady = false
-  const pending: Buffer[] = []
+  const pending = []
 
   openaiWs.on('open', () => {
     console.log('[WS] Connected to OpenAI Realtime')
@@ -176,7 +176,7 @@ wss.on('connection', (browserWs, req) => {
 
   browserWs.on('message', (data, isBinary) => {
     if (sessionReady && openaiWs.readyState === WebSocket.OPEN) openaiWs.send(data, { binary: isBinary })
-    else pending.push(data as Buffer)
+    else pending.push(data)
   })
 
   browserWs.on('close', (code) => {
