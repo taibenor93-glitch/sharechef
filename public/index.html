@@ -515,7 +515,7 @@ function handleRealtimeEvent(msg) {
       orbWrap.classList.remove('speaking')
       orbHint.textContent = 'Tap to speak'
       setStatus('ready', 'Your turn — tap the mic')
-      setTimeout(() => { if (!isSpeaking && !isProcessing) startListening() }, 200)
+      setTimeout(() => { if (!isSpeaking && !isProcessing && playbackCtx) startListening() }, 200)
       break
     case 'error':
       console.error('[Realtime]', msg.error)
@@ -534,14 +534,18 @@ function queueAudio(base64Chunk) {
 
 function processAudioQueue() {
   if (audioQueue.length === 0) { isPlayingAudio = false; return }
+
+  // Discard queued audio if AudioContext hasn't been unlocked by a user gesture yet.
+  // Must happen before setting isPlayingAudio, otherwise the flag sticks true
+  // and all future audio is silently dropped.
+  if (!playbackCtx) { audioQueue = []; isPlayingAudio = false; return }
+
   isPlayingAudio = true
   isSpeaking = true
   orb.classList.add('speaking')
   orbWrap.classList.add('speaking')
   orbHint.textContent = 'Tap to interrupt'
   setStatus('speaking', 'Chef is speaking…')
-
-  if (!playbackCtx) return  // not yet initialized by user gesture; drop chunk
 
   const chunk  = audioQueue.shift()
   const binary = atob(chunk)
