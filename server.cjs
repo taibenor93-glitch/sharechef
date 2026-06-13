@@ -186,7 +186,7 @@ wss.on('connection', (browserWs, req) => {
 // ── Static (Vite build) ───────────────────────────────────────────────────────
 
 app.use(express.static(join(__dirname, 'dist')))
-app.get('/*', (_req, res) => res.sendFile(join(__dirname, 'dist', 'index.html')))
+app.use((_req, res) => res.sendFile(join(__dirname, 'dist', 'index.html')))
 
 server.listen(PORT, () => {
   console.log(`\n  ShareChef AI  →  http://localhost:${PORT}`)
