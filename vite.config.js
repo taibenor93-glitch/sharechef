@@ -3,4 +3,13 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
+  server: {
+    proxy: {
+      '/ws/realtime': { target: 'ws://localhost:3000', ws: true },
+      '/api':         { target: 'http://localhost:3000' },
+      '/chat':        { target: 'http://localhost:3000' },
+      '/token':       { target: 'http://localhost:3000' },
+      '/health':      { target: 'http://localhost:3000' },
+    },
+  },
 })
