@@ -135,7 +135,7 @@ wss.on('connection', (browserWs, req) => {
       session: {
         modalities: ['audio', 'text'],
         instructions: CHEF_PROMPT,
-        voice: 'nova',
+        voice: 'coral',
         input_audio_format: 'pcm16',
         output_audio_format: 'pcm16',
         input_audio_transcription: { model: 'whisper-1' },
