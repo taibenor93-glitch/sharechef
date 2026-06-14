@@ -1,7 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react"
 import { generateRecipe } from "../api/recipe"
 import { validateIngredients } from "../lib/honestRules"
-import { speak } from "../voice/tts"
 import { RealtimeVoice, type VoiceStatus } from "../voice/realtimeVoice"
 
 export type HomePageHandle = {
@@ -41,7 +40,6 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
   const [result, setResult] = useState("")
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [chatInput, setChatInput] = useState("")
-  const hasGreeted = useRef(false)
   const [lastIngredients, setLastIngredients] = useState<string[]>([])
   const [micheliStarLevel, setMicheliStarLevel] = useState(0)
   const [userLanguage, setUserLanguage] = useState<string>("en")
@@ -310,24 +308,6 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
     }
   }, [])
 
-  useEffect(() => {
-    if (hasGreeted.current) return
-    hasGreeted.current = true
-    const copy = getCopy(userLanguage)
-    void speak(copy.greeting, userLanguage)
-  }, [userLanguage])
-
-  async function speakInOrder(reply: string) {
-    const synth = (window as any).speechSynthesis
-    synth?.cancel?.()
-    const ack = getCopy(userLanguage).ack
-    console.log("SPEAKING:", ack)
-    await speak(ack, userLanguage)
-
-    console.log("SPEAKING:", reply)
-    await speak(reply, userLanguage)
-  }
-
   async function runAssistant(listOverride?: string[], rawUserText?: string) {
     const runList = normalizeList(listOverride ?? list)
     const userText = rawUserText ?? runList.join(", ")
@@ -340,7 +320,6 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
       const translated = translateValidation(validation.message, userLanguage)
       setResult(translated)
       addMessage("assistant", translated)
-      await speakInOrder(translated)
       return
     }
 
@@ -353,12 +332,10 @@ export const HomePage = forwardRef<HomePageHandle>(function HomePage(_props, ref
     setLastIngredients(runList)
     const progress = incrementCookedCount()
     incrementMetric("recipe_view_count")
-    await speakInOrder(reply)
 
     if (progress.leveledUp) {
       const celebration = getCopy(userLanguage).celebration
       addMessage("assistant", celebration)
-      await speak(celebration, userLanguage)
     }
   }
 
