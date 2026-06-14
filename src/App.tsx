@@ -2,11 +2,32 @@ import * as React from "react"
 import { Routes, Route } from "react-router-dom"
 import { HomePage, type HomePageHandle } from "./pages/Home"
 import { NavBar } from "./components/NavBar"
-import { debugStartVoice } from "./voice/micheliGuide"
-import { startListening } from "./voice/speech"
+import { RealtimeVoice } from "./voice/realtimeVoice"
 
 export default function App(): JSX.Element {
   const homeRef = React.useRef<HomePageHandle>(null)
+  const voiceRef = React.useRef<RealtimeVoice | null>(null)
+  const [active, setActive] = React.useState(false)
+
+  const handleVoiceToggle = async () => {
+    if (active) {
+      voiceRef.current?.disconnect()
+      voiceRef.current = null
+      setActive(false)
+      return
+    }
+
+    const voice = new RealtimeVoice({
+      onStatus: (s) => console.log('[voice]', s),
+      onTranscript: (text, role) => console.log(`[${role}]`, text),
+      onError: (msg) => console.error('[voice error]', msg),
+    })
+    voiceRef.current = voice
+
+    await voice.unlockAudio()
+    voice.connect()
+    setActive(true)
+  }
 
   return (
     <>
@@ -14,24 +35,8 @@ export default function App(): JSX.Element {
       <Routes>
         <Route path="/" element={<HomePage ref={homeRef} />} />
       </Routes>
-      <button
-        onClick={() => {
-          debugStartVoice()
-          const recognition = startListening(async (text) => {
-            console.log("HEARD:", text)
-            const list = text
-              .split(",")
-              .map((s) => s.trim())
-              .filter(Boolean)
-              .slice(0, 4)
-
-            homeRef.current?.setIngredientsFromVoice?.(list)
-            await homeRef.current?.optimizeWithList?.(list)
-          })
-          recognition?.start?.()
-        }}
-      >
-        DEV: Start Voice
+      <button onClick={handleVoiceToggle}>
+        {active ? 'DEV: Stop Voice' : 'DEV: Start Voice'}
       </button>
     </>
   )
