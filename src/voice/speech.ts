@@ -9,14 +9,13 @@ export function startListening(onText: (text: string) => void): any {
 
   const recognition = new SpeechRecognition()
   recognition.lang = "en-US"
-  recognition.continuous = false
-  recognition.interimResults = false
+  recognition.continuous = true
+  recognition.interimResults = true
 
   recognition.onresult = (event: any) => {
     const transcript = Array.from(event.results as Iterable<SpeechRecognitionResult>)
-      .flatMap((result) => Array.from(result as Iterable<any>))
-      .filter((alt) => alt.isFinal)
-      .map((alt) => alt.transcript)
+      .filter((result: any) => result.isFinal)
+      .map((result: any) => (result[0] as any).transcript)
       .join(" ")
       .trim()
 
