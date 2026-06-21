@@ -1,6 +1,9 @@
 node_modules/
+dist/
 .env
 .env.*
+.envsk*
+.env*
 server/.env
-node_modules/
-server/.env
+*.local
+.DS_Store
