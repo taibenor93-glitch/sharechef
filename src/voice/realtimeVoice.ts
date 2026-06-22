@@ -17,6 +17,7 @@ export class RealtimeVoice {
   private processorNode: AudioWorkletNode | null = null
   private audioQueue: string[] = []
   private isPlayingAudio = false
+  private nextPlayTime = 0
   private isListening = false
   private isTalking = false
   private silenceTimer: ReturnType<typeof setTimeout> | null = null
@@ -130,10 +131,17 @@ export class RealtimeVoice {
           this.pendingTranscript = ''
         }
         break
-      case 'response.done':
-        // Auto-resume listening only if the user has already unlocked audio
-        setTimeout(() => { if (this.playbackCtx) this.startListening() }, 200)
+      case 'response.done': {
+        // Wait for all scheduled audio to finish before resuming mic
+        const remaining = this.playbackCtx
+          ? Math.max(0, (this.nextPlayTime - this.playbackCtx.currentTime) * 1000) + 250
+          : 250
+        setTimeout(() => {
+          this.isPlayingAudio = false
+          if (this.playbackCtx) this.startListening()
+        }, remaining)
         break
+      }
       case 'error':
         this.cb.onError((msg.error as any)?.message || 'Realtime API error')
         this.cb.onStatus('ready')
@@ -166,35 +174,26 @@ export class RealtimeVoice {
   }
 
   private queueAudio(base64: string): void {
-    this.audioQueue.push(base64)
-    if (!this.isPlayingAudio) this.processAudioQueue()
-  }
-
-  private processAudioQueue(): void {
-    if (this.audioQueue.length === 0) { this.isPlayingAudio = false; return }
-    // Guard must come before setting isPlayingAudio — if playbackCtx is null the flag
-    // would stick true permanently and all future audio would be silently dropped.
-    if (!this.playbackCtx) { this.audioQueue = []; this.isPlayingAudio = false; return }
-
-    this.isPlayingAudio = true
-    this.cb.onStatus('speaking')
-
-    const chunk = this.audioQueue.shift()!
-    const binary = atob(chunk)
+    if (!this.playbackCtx) return
+    if (!this.isPlayingAudio) {
+      this.isPlayingAudio = true
+      this.nextPlayTime = this.playbackCtx.currentTime
+      this.cb.onStatus('speaking')
+    }
+    // Gapless: schedule each chunk to start exactly when the previous ends
+    const binary = atob(base64)
     const bytes = new Uint8Array(binary.length)
     for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
-
     const samples = new Float32Array(bytes.length / 2)
     const view = new DataView(bytes.buffer)
     for (let i = 0; i < samples.length; i++) samples[i] = view.getInt16(i * 2, true) / 32768
-
     const buffer = this.playbackCtx.createBuffer(1, samples.length, 24000)
     buffer.getChannelData(0).set(samples)
     const source = this.playbackCtx.createBufferSource()
     source.buffer = buffer
     source.connect(this.playbackCtx.destination)
-    source.onended = () => this.processAudioQueue()
-    source.start()
+    source.start(this.nextPlayTime)
+    this.nextPlayTime += buffer.duration
   }
 
   private wsSend(msg: object): void {
