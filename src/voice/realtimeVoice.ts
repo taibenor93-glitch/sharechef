@@ -42,7 +42,6 @@ export class RealtimeVoice {
     this.ws.onerror = () => this.cb.onError('Connection error — refresh to reconnect.')
     this.ws.onclose = () => {
       this.stopListening()
-      this.audioQueue = []
       this.isPlayingAudio = false
       this.cb.onStatus('idle')
     }
@@ -50,7 +49,6 @@ export class RealtimeVoice {
 
   disconnect(): void {
     this.stopListening()
-    this.audioQueue = []
     this.isPlayingAudio = false
     if (this.ws) { this.ws.onclose = null; this.ws.close(); this.ws = null }
     this.cb.onStatus('idle')
@@ -82,7 +80,6 @@ export class RealtimeVoice {
       this.processorNode.connect(this.audioCtx!.destination)
 
       this.isListening = true
-      this.isTalking = false
       this.cb.onStatus('listening')
     } catch {
       this.cb.onError('Mic access denied. Please allow microphone in your browser settings.')
@@ -100,7 +97,6 @@ export class RealtimeVoice {
   }
 
   stopAudio(): void {
-    this.audioQueue = []
     this.isPlayingAudio = false
     this.wsSend({ type: 'response.cancel' })
     this.wsSend({ type: 'input_audio_buffer.clear' })
