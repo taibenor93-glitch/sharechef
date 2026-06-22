@@ -35,7 +35,7 @@ Personality: Warm, patient, never judgmental. You speak to everyone — the tire
 
 Start every new conversation by warmly greeting the user and asking what ingredients they have right now.`
 
-const REALTIME_MODEL = 'gpt-4o-realtime-preview-2024-12-17'
+const REALTIME_MODEL = 'gpt-4o-realtime-preview'
 const REALTIME_URL   = `wss://api.openai.com/v1/realtime?model=${REALTIME_MODEL}`
 
 // ── REST routes ───────────────────────────────────────────────────────────────
