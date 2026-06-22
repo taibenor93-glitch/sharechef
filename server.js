@@ -133,7 +133,7 @@ wss.on('connection', (browserWs, req) => {
     openaiWs.send(JSON.stringify({
       type: 'session.update',
       session: {
-        type: 'session',
+        type: 'realtime',
         modalities: ['audio', 'text'],
         instructions: CHEF_PROMPT,
         voice: 'shimmer',
