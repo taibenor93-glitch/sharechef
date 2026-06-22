@@ -148,6 +148,8 @@ export class RealtimeVoice {
     if (!this.isPlayingAudio) {
       this.isPlayingAudio = true
       this.nextPlayTime = this.playbackCtx.currentTime
+      // Mute mic while AI speaks — prevents echo loop with server VAD
+      this.stopListening()
       this.cb.onStatus('speaking')
     }
     // Gapless: schedule each chunk to start exactly when the previous ends
