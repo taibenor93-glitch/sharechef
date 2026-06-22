@@ -75,13 +75,13 @@ export class RealtimeVoice {
       if (!this.audioCtx) {
         this.audioCtx = new (
           (window as any).AudioContext || (window as any).webkitAudioContext
-        )({ sampleRate: 24000 })
+        )()
         await this.audioCtx!.audioWorklet.addModule('/audio-processor.js')
       }
       if (this.audioCtx!.state === 'suspended') await this.audioCtx!.resume()
 
       const source = this.audioCtx!.createMediaStreamSource(this.micStream!)
-      this.processorNode = new AudioWorkletNode(this.audioCtx!, 'pcm-audio-processor')
+      this.processorNode = new AudioWorkletNode(this.audioCtx!, 'pcm-audio-processor', { processorOptions: { inputRate: this.audioCtx!.sampleRate } })
       this.processorNode.port.onmessage = (event) => this.onAudioChunk(event.data as ArrayBuffer)
       source.connect(this.processorNode)
       this.processorNode.connect(this.audioCtx!.destination)
