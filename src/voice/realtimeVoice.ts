@@ -21,13 +21,13 @@ export class RealtimeVoice {
   private isTalking = false
   private silenceTimer: ReturnType<typeof setTimeout> | null = null
   private pendingTranscript = ''
-  private _resumeAfterSpeaking = false
   private cb: VoiceCallbacks
 
   constructor(callbacks: VoiceCallbacks) {
     this.cb = callbacks
   }
 
+  /** Must be called inside a user gesture — unlocks AudioContext on iOS. */
   async unlockAudio(): Promise<void> {
     if (!this.playbackCtx) {
       this.playbackCtx = new (
@@ -109,11 +109,12 @@ export class RealtimeVoice {
   stopAudio(): void {
     this.audioQueue = []
     this.isPlayingAudio = false
-    this._resumeAfterSpeaking = false
     this.wsSend({ type: 'response.cancel' })
     this.wsSend({ type: 'input_audio_buffer.clear' })
     this.cb.onStatus('ready')
   }
+
+  // ── Private ──────────────────────────────────────────────────────────────────
 
   private handleEvent(msg: Record<string, any>): void {
     switch (msg.type) {
@@ -130,7 +131,8 @@ export class RealtimeVoice {
         }
         break
       case 'response.done':
-        this._resumeAfterSpeaking = true
+        // Auto-resume listening only if the user has already unlocked audio
+        setTimeout(() => { if (this.playbackCtx) this.startListening() }, 200)
         break
       case 'error':
         this.cb.onError((msg.error as any)?.message || 'Realtime API error')
@@ -142,6 +144,8 @@ export class RealtimeVoice {
   private onAudioChunk(buf: ArrayBuffer): void {
     if (!this.isListening) return
     const int16 = new Int16Array(buf)
+
+    // RMS VAD
     let sum = 0
     for (let i = 0; i < int16.length; i++) { const s = int16[i] / 32768; sum += s * s }
     if (Math.sqrt(sum / int16.length) > SILENCE_THRESHOLD) {
@@ -149,6 +153,7 @@ export class RealtimeVoice {
       if (this.silenceTimer) clearTimeout(this.silenceTimer)
       this.silenceTimer = setTimeout(() => this.onSilenceDetected(), SILENCE_DURATION)
     }
+
     this.wsSend({ type: 'input_audio_buffer.append', audio: this.toBase64(buf) })
   }
 
@@ -166,24 +171,23 @@ export class RealtimeVoice {
   }
 
   private processAudioQueue(): void {
-    if (this.audioQueue.length === 0) {
-      this.isPlayingAudio = false
-      if (this._resumeAfterSpeaking) {
-        this._resumeAfterSpeaking = false
-        setTimeout(() => { if (this.playbackCtx) this.startListening() }, 300)
-      }
-      return
-    }
+    if (this.audioQueue.length === 0) { this.isPlayingAudio = false; return }
+    // Guard must come before setting isPlayingAudio — if playbackCtx is null the flag
+    // would stick true permanently and all future audio would be silently dropped.
     if (!this.playbackCtx) { this.audioQueue = []; this.isPlayingAudio = false; return }
+
     this.isPlayingAudio = true
     this.cb.onStatus('speaking')
+
     const chunk = this.audioQueue.shift()!
     const binary = atob(chunk)
     const bytes = new Uint8Array(binary.length)
     for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+
     const samples = new Float32Array(bytes.length / 2)
     const view = new DataView(bytes.buffer)
     for (let i = 0; i < samples.length; i++) samples[i] = view.getInt16(i * 2, true) / 32768
+
     const buffer = this.playbackCtx.createBuffer(1, samples.length, 24000)
     buffer.getChannelData(0).set(samples)
     const source = this.playbackCtx.createBufferSource()
@@ -204,4 +208,3 @@ export class RealtimeVoice {
     return btoa(bin)
   }
 }
-
