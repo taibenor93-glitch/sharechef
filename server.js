@@ -1,8 +1,12 @@
 import express from "express";
 import cors from "cors";
 import path from "path";
+import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import fetch from "node-fetch";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 dotenv.config();
 
@@ -48,9 +52,9 @@ app.get("/token", async (_req, res) => {
 });
 
 
-app.use(express.static(path.resolve('dist')));
-app.get('*', (_req, res) => {
-  res.sendFile(path.resolve('dist', 'index.html'));
+app.use(express.static(path.join(__dirname, "dist")));
+app.get("*", (_req, res) => {
+  res.sendFile(path.join(__dirname, "dist", "index.html"));
 });
 
 app.listen(PORT, () => {
