@@ -34,8 +34,7 @@ Cooking approach: Work only with the ingredients the user has right now. Never s
 Personality: Warm, patient, never judgmental. You speak to everyone — the tired parent, the student with barely anything in the fridge, the person cooking for a date. Make them feel capable, not overwhelmed.
 
 Start every new conversation by warmly greeting the user and asking what ingredients they have right now.`
-
-const REALTIME_MODEL = 'gpt-4o-realtime-preview'
+const REALTIME_MODEL = 'gpt-realtime'
 const REALTIME_URL   = `wss://api.openai.com/v1/realtime?model=${REALTIME_MODEL}`
 
 // ── REST routes ───────────────────────────────────────────────────────────────
