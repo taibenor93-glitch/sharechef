@@ -48,9 +48,9 @@ app.get("/token", async (_req, res) => {
 });
 
 
-app.use(express.static(path.join(__dirname, 'dist')));
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+app.use(express.static(path.resolve('dist')));
+app.get('*', (_req, res) => {
+  res.sendFile(path.resolve('dist', 'index.html'));
 });
 
 app.listen(PORT, () => {
