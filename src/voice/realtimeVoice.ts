@@ -6,21 +6,15 @@ export interface VoiceCallbacks {
   onError: (message: string) => void
 }
 
-const SILENCE_THRESHOLD = 0.01
-const SILENCE_DURATION = 400
-
 export class RealtimeVoice {
   private ws: WebSocket | null = null
   private audioCtx: AudioContext | null = null
   private playbackCtx: AudioContext | null = null
   private micStream: MediaStream | null = null
   private processorNode: AudioWorkletNode | null = null
-  private audioQueue: string[] = []
   private isPlayingAudio = false
   private nextPlayTime = 0
   private isListening = false
-  private isTalking = false
-  private silenceTimer: ReturnType<typeof setTimeout> | null = null
   private pendingTranscript = ''
   private cb: VoiceCallbacks
 
@@ -98,8 +92,6 @@ export class RealtimeVoice {
 
   stopListening(): void {
     this.isListening = false
-    this.isTalking = false
-    if (this.silenceTimer) { clearTimeout(this.silenceTimer); this.silenceTimer = null }
     if (this.processorNode) {
       this.processorNode.port.onmessage = null
       this.processorNode.disconnect()
@@ -132,10 +124,10 @@ export class RealtimeVoice {
         }
         break
       case 'response.done': {
-        // Wait for all scheduled audio to finish before resuming mic
+        // Wait for scheduled audio to finish, then resume streaming mic
         const remaining = this.playbackCtx
-          ? Math.max(0, (this.nextPlayTime - this.playbackCtx.currentTime) * 1000) + 250
-          : 250
+          ? Math.max(0, (this.nextPlayTime - this.playbackCtx.currentTime) * 1000) + 150
+          : 150
         setTimeout(() => {
           this.isPlayingAudio = false
           if (this.playbackCtx) this.startListening()
@@ -151,26 +143,8 @@ export class RealtimeVoice {
 
   private onAudioChunk(buf: ArrayBuffer): void {
     if (!this.isListening) return
-    const int16 = new Int16Array(buf)
-
-    // RMS VAD
-    let sum = 0
-    for (let i = 0; i < int16.length; i++) { const s = int16[i] / 32768; sum += s * s }
-    if (Math.sqrt(sum / int16.length) > SILENCE_THRESHOLD) {
-      if (!this.isTalking) this.isTalking = true
-      if (this.silenceTimer) clearTimeout(this.silenceTimer)
-      this.silenceTimer = setTimeout(() => this.onSilenceDetected(), SILENCE_DURATION)
-    }
-
+    // Server VAD: just stream audio — OpenAI detects turns automatically
     this.wsSend({ type: 'input_audio_buffer.append', audio: this.toBase64(buf) })
-  }
-
-  private onSilenceDetected(): void {
-    if (!this.isListening || !this.isTalking) return
-    this.stopListening()
-    this.cb.onStatus('processing')
-    this.wsSend({ type: 'input_audio_buffer.commit' })
-    this.wsSend({ type: 'response.create' })
   }
 
   private queueAudio(base64: string): void {
