@@ -1,56 +1,74 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import type { FormEvent } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 
 export function SignupPage() {
+  const nav = useNavigate()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
-  const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
 
-  const onSubmit = async (e: React.FormEvent) => {
+  const onSubmit = async (e: FormEvent) => {
     e.preventDefault()
     setBusy(true)
     setError(null)
-    setMessage(null)
-
-    const { error } = await supabase.auth.signUp({ email, password })
+    setNotice(null)
+    const { data, error } = await supabase.auth.signUp({ email, password })
     setBusy(false)
-
     if (error) return setError(error.message)
-
-    setMessage('Signup successful. If email confirmation is enabled, check your inbox and confirm, then log in.')
+    if (data.session) {
+      nav('/', { replace: true })
+    } else {
+      setNotice('Account created. Check your email to confirm, then sign in.')
+    }
   }
 
   return (
-    <div className="container">
-      <div className="card stack" style={{ maxWidth: 520, margin: '0 auto' }}>
-        <div>
-          <div className="h1">Signup</div>
-          <div className="muted">Create your account.</div>
+    <div className="auth-wrap">
+      <div className="auth-card stack">
+        <div className="auth-hero">
+          <div className="auth-logo"><span className="brand-dot" /> ShareChef</div>
+          <div className="spacer" />
+          <div className="auth-title">Create your kitchen</div>
+          <div className="auth-sub">Save recipes and earn your Micheli Star.</div>
         </div>
 
-        <form className="stack" onSubmit={onSubmit}>
-          <div className="stack">
-            <div>
-              <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>Email</div>
-              <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
-            </div>
-            <div>
-              <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>Password</div>
-              <input value={password} onChange={(e) => setPassword(e.target.value)} type="password" placeholder="Create a password (10+ chars recommended)" />
-            </div>
+        <form className="card stack" onSubmit={onSubmit}>
+          <div className="field">
+            <label className="label">Email</label>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@example.com"
+              autoComplete="email"
+              required
+            />
           </div>
-
-          {error && <div className="card" style={{ borderColor: '#ffd4d4', background: '#fff5f5' }}>{error}</div>}
-          {message && <div className="card" style={{ borderColor: '#d6f5d6', background: '#f3fff3' }}>{message}</div>}
-
-          <button className="primary" disabled={busy} type="submit">{busy ? 'Creating…' : 'Sign Up'}</button>
+          <div className="field">
+            <label className="label">Password</label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="At least 6 characters"
+              autoComplete="new-password"
+              minLength={6}
+              required
+            />
+          </div>
+          {error && <div className="alert alert-error">{error}</div>}
+          {notice && <div className="alert alert-ok">{notice}</div>}
+          <button className="btn btn-primary btn-block" disabled={busy}>
+            {busy ? 'Creating…' : 'Create account'}
+          </button>
         </form>
 
-        <div className="muted" style={{ fontSize: 13 }}>
-          Already have an account? <Link to="/login" style={{ textDecoration: 'underline' }}>Login</Link>
+        <div className="auth-alt">
+          Already have an account? <Link to="/login">Sign in</Link>
         </div>
       </div>
     </div>

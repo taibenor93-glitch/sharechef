@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import type { FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 
@@ -9,52 +10,57 @@ export function LoginPage() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const onSubmit = async (e: React.FormEvent) => {
+  const onSubmit = async (e: FormEvent) => {
     e.preventDefault()
     setBusy(true)
     setError(null)
-
     const { error } = await supabase.auth.signInWithPassword({ email, password })
     setBusy(false)
-
     if (error) return setError(error.message)
-    localStorage.setItem('lastLogin', new Date().toLocaleString())
-
-
     nav('/', { replace: true })
   }
 
   return (
-    <div className="container">
-      <div className="card stack" style={{ maxWidth: 520, margin: '0 auto' }}>
-        <div>
-          <div className="h1">Login</div>
-          <div className="muted">Use your email + password.</div>
+    <div className="auth-wrap">
+      <div className="auth-card stack">
+        <div className="auth-hero">
+          <div className="auth-logo"><span className="brand-dot" /> ShareChef</div>
+          <div className="spacer" />
+          <div className="auth-title">Welcome back</div>
+          <div className="auth-sub">Sign in to cook with Micheli.</div>
         </div>
-        {localStorage.getItem('lastLogin') && (
-  <div className="muted" style={{ fontSize: 12 }}>Last login: {localStorage.getItem('lastLogin')}</div>
-)}
 
-
-        <form className="stack" onSubmit={onSubmit}>
-          <div className="stack">
-            <div>
-              <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>Email</div>
-              <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
-            </div>
-            <div>
-              <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>Password</div>
-              <input value={password} onChange={(e) => setPassword(e.target.value)} type="password" placeholder="Your password" />
-            </div>
+        <form className="card stack" onSubmit={onSubmit}>
+          <div className="field">
+            <label className="label">Email</label>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@example.com"
+              autoComplete="email"
+              required
+            />
           </div>
-
-          {error && <div className="card" style={{ borderColor: '#ffd4d4', background: '#fff5f5' }}>{error}</div>}
-
-          <button className="primary" disabled={busy} type="submit">{busy ? 'Logging in…' : 'Login'}</button>
+          <div className="field">
+            <label className="label">Password</label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Your password"
+              autoComplete="current-password"
+              required
+            />
+          </div>
+          {error && <div className="alert alert-error">{error}</div>}
+          <button className="btn btn-primary btn-block" disabled={busy}>
+            {busy ? 'Signing in…' : 'Sign in'}
+          </button>
         </form>
 
-        <div className="muted" style={{ fontSize: 13 }}>
-          No account? <Link to="/signup" style={{ textDecoration: 'underline' }}>Sign up</Link>
+        <div className="auth-alt">
+          New to ShareChef? <Link to="/signup">Create an account</Link>
         </div>
       </div>
     </div>

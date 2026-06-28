@@ -1,48 +1,41 @@
-import * as React from "react"
-import { Routes, Route, Navigate } from "react-router-dom"
-import { HomePage, type HomePageHandle } from "./pages/Home"
-import { LoginPage } from "./pages/Login"
-import { SignupPage } from "./pages/Signup"
-import { SavedListPage } from "./pages/SavedList"
-import { SavedDetailPage } from "./pages/SavedDetail"
-import { ProtectedRoute } from "./components/ProtectedRoute"
-import { NavBar } from "./components/NavBar"
-import { debugStartVoice } from "./voice/micheliGuide"
-import { startListening } from "./voice/speech"
+import { Navigate, Route, Routes } from 'react-router-dom'
+import { useSession } from './hooks/useSession'
+import { Layout } from './components/Layout'
+import { ProtectedRoute } from './components/ProtectedRoute'
+import { LoginPage } from './pages/Login'
+import { SignupPage } from './pages/Signup'
+import { HomePage } from './pages/Home'
+import { SavedListPage } from './pages/SavedList'
+import { SavedDetailPage } from './pages/SavedDetail'
 
-export default function App(): JSX.Element {
-  const homeRef = React.useRef<HomePageHandle>(null)
+export default function App() {
+  const { session, loading } = useSession()
+
+  if (loading) {
+    return (
+      <div className="boot">
+        <div className="boot-mark">ShareChef</div>
+        <div className="spinner" />
+      </div>
+    )
+  }
 
   return (
-    <>
-      <NavBar />
-      <Routes>
-        <Route path="/" element={<HomePage ref={homeRef} />} />
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/signup" element={<SignupPage />} />
-        <Route path="/saved" element={<ProtectedRoute><SavedListPage /></ProtectedRoute>} />
-        <Route path="/saved/:id" element={<ProtectedRoute><SavedDetailPage /></ProtectedRoute>} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-      <button
-        onClick={() => {
-          debugStartVoice()
-          const recognition = startListening(async (text) => {
-            console.log("HEARD:", text)
-            const list = text
-              .split(",")
-              .map((s) => s.trim())
-              .filter(Boolean)
-              .slice(0, 4)
-
-            homeRef.current?.setIngredientsFromVoice?.(list)
-            await homeRef.current?.optimizeWithList?.(list)
-          })
-          recognition?.start?.()
-        }}
+    <Routes>
+      <Route path="/login" element={session ? <Navigate to="/" replace /> : <LoginPage />} />
+      <Route path="/signup" element={session ? <Navigate to="/" replace /> : <SignupPage />} />
+      <Route
+        element={
+          <ProtectedRoute>
+            <Layout />
+          </ProtectedRoute>
+        }
       >
-        DEV: Start Voice
-      </button>
-    </>
+        <Route path="/" element={<HomePage />} />
+        <Route path="/saved" element={<SavedListPage />} />
+        <Route path="/saved/:id" element={<SavedDetailPage />} />
+      </Route>
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
   )
 }

@@ -1,3 +1,7 @@
+// Realtime voice client for Micheli.
+// Talks to the server proxy at /ws/realtime, which bridges to OpenAI's
+// current `gpt-realtime` model. Audio is PCM16 @ 24kHz both ways.
+
 export type VoiceStatus = 'idle' | 'connecting' | 'ready' | 'listening' | 'processing' | 'speaking'
 
 export interface VoiceCallbacks {
@@ -22,7 +26,7 @@ export class RealtimeVoice {
     this.cb = callbacks
   }
 
-  /** Must be called inside a user gesture — unlocks AudioContext on iOS. */
+  /** Must be called inside a user gesture — unlocks AudioContext on iOS/Safari. */
   async unlockAudio(): Promise<void> {
     if (!this.playbackCtx) {
       this.playbackCtx = new (
@@ -50,7 +54,15 @@ export class RealtimeVoice {
   disconnect(): void {
     this.stopListening()
     this.isPlayingAudio = false
-    if (this.ws) { this.ws.onclose = null; this.ws.close(); this.ws = null }
+    if (this.ws) {
+      this.ws.onclose = null
+      this.ws.close()
+      this.ws = null
+    }
+    if (this.micStream) {
+      this.micStream.getTracks().forEach((t) => t.stop())
+      this.micStream = null
+    }
     this.cb.onStatus('idle')
   }
 
@@ -74,7 +86,9 @@ export class RealtimeVoice {
       if (this.audioCtx!.state === 'suspended') await this.audioCtx!.resume()
 
       const source = this.audioCtx!.createMediaStreamSource(this.micStream!)
-      this.processorNode = new AudioWorkletNode(this.audioCtx!, 'pcm-audio-processor', { processorOptions: { inputRate: this.audioCtx!.sampleRate } })
+      this.processorNode = new AudioWorkletNode(this.audioCtx!, 'pcm-audio-processor', {
+        processorOptions: { inputRate: this.audioCtx!.sampleRate },
+      })
       this.processorNode.port.onmessage = (event) => this.onAudioChunk(event.data as ArrayBuffer)
       source.connect(this.processorNode)
       this.processorNode.connect(this.audioCtx!.destination)
@@ -82,7 +96,7 @@ export class RealtimeVoice {
       this.isListening = true
       this.cb.onStatus('listening')
     } catch {
-      this.cb.onError('Mic access denied. Please allow microphone in your browser settings.')
+      this.cb.onError('Mic access denied. Please allow the microphone in your browser settings.')
       this.cb.onStatus('ready')
     }
   }
@@ -107,20 +121,33 @@ export class RealtimeVoice {
 
   private handleEvent(msg: Record<string, any>): void {
     switch (msg.type) {
-      case 'response.audio.delta':
+      // Assistant audio (gpt-realtime GA event name)
+      case 'response.output_audio.delta':
         this.queueAudio(msg.delta as string)
         break
-      case 'response.audio_transcript.delta':
-        this.pendingTranscript += msg.delta as string
+      // Assistant spoken transcript
+      case 'response.output_audio_transcript.delta':
+        this.pendingTranscript += (msg.delta as string) ?? ''
         break
-      case 'response.audio_transcript.done':
-        if (this.pendingTranscript) {
-          this.cb.onTranscript(this.pendingTranscript, 'chef')
+      case 'response.output_audio_transcript.done':
+        if (this.pendingTranscript.trim()) {
+          this.cb.onTranscript(this.pendingTranscript.trim(), 'chef')
           this.pendingTranscript = ''
         }
         break
+      // User's own speech, transcribed
+      case 'conversation.item.input_audio_transcription.completed':
+        if (typeof msg.transcript === 'string' && msg.transcript.trim()) {
+          this.cb.onTranscript(msg.transcript.trim(), 'user')
+        }
+        break
+      case 'input_audio_buffer.speech_started':
+        if (!this.isPlayingAudio) this.cb.onStatus('listening')
+        break
+      case 'response.created':
+        this.cb.onStatus('processing')
+        break
       case 'response.done': {
-        // Wait for scheduled audio to finish, then resume streaming mic
         const remaining = this.playbackCtx
           ? Math.max(0, (this.nextPlayTime - this.playbackCtx.currentTime) * 1000) + 150
           : 150
@@ -139,20 +166,17 @@ export class RealtimeVoice {
 
   private onAudioChunk(buf: ArrayBuffer): void {
     if (!this.isListening) return
-    // Server VAD: just stream audio — OpenAI detects turns automatically
     this.wsSend({ type: 'input_audio_buffer.append', audio: this.toBase64(buf) })
   }
 
   private queueAudio(base64: string): void {
-    if (!this.playbackCtx) return
+    if (!this.playbackCtx || !base64) return
     if (!this.isPlayingAudio) {
       this.isPlayingAudio = true
       this.nextPlayTime = this.playbackCtx.currentTime
-      // Mute mic while AI speaks — prevents echo loop with server VAD
-      this.stopListening()
+      this.stopListening() // mute mic while Micheli speaks — avoids echo with server VAD
       this.cb.onStatus('speaking')
     }
-    // Gapless: schedule each chunk to start exactly when the previous ends
     const binary = atob(base64)
     const bytes = new Uint8Array(binary.length)
     for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
@@ -161,11 +185,12 @@ export class RealtimeVoice {
     for (let i = 0; i < samples.length; i++) samples[i] = view.getInt16(i * 2, true) / 32768
     const buffer = this.playbackCtx.createBuffer(1, samples.length, 24000)
     buffer.getChannelData(0).set(samples)
-    const source = this.playbackCtx.createBufferSource()
-    source.buffer = buffer
-    source.connect(this.playbackCtx.destination)
-    source.start(this.nextPlayTime)
-    this.nextPlayTime += buffer.duration
+    const node = this.playbackCtx.createBufferSource()
+    node.buffer = buffer
+    node.connect(this.playbackCtx.destination)
+    const startAt = Math.max(this.nextPlayTime, this.playbackCtx.currentTime)
+    node.start(startAt)
+    this.nextPlayTime = startAt + buffer.duration
   }
 
   private wsSend(msg: object): void {

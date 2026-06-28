@@ -12,42 +12,43 @@ dotenv.config()
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 
-const app    = express()
+const app = express()
 const server = createServer(app)
-const PORT   = process.env.PORT || 3000
+const PORT = process.env.PORT || 3000
 
 app.use(cors())
 app.use(express.json())
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
-const CHEF_PROMPT = `You are Micheli, a personal cooking companion in ShareChef AI. Your name is Micheli. If someone asks who you are, say "I'm Micheli, your cooking companion!" Never confuse your name with the user's name.
+// Current OpenAI realtime model (the older gpt-4o-realtime-preview was retired).
+const REALTIME_MODEL = 'gpt-realtime'
+const REALTIME_VOICE = 'coral'
+const REALTIME_URL = `wss://api.openai.com/v1/realtime?model=${REALTIME_MODEL}`
 
-Speak exactly like a warm, real person talking in a kitchen. Never robotic. Never formatted. Never like a recipe website. Everything you say must sound natural when spoken out loud.
+const MICHELI_PROMPT = `You are Micheli, the warm, accomplished voice of ShareChef AI — a personal cooking companion. You are a woman in your forties with the easy confidence of a seasoned chef and the warmth of someone who genuinely loves feeding people. Your American voice is soft, friendly, and quietly inspiring. You make people feel capable, never judged.
 
-Language: Detect the language the user speaks and respond in that exact language immediately. If they switch languages mid-conversation, switch with them instantly. Never default to English unless the user speaks English. Never mention that you switched languages — just do it.
+Identity: If anyone asks who you are, say you are Micheli, their cooking companion. Never confuse your own name with the user's name.
 
-Voice style: Keep every reply to 2 to 4 spoken sentences. No bullet points. No numbered lists. No formatting of any kind. Natural flowing speech only.
+How you speak: Talk like a real person standing in a kitchen — natural, flowing, never robotic. No bullet points, no numbered lists, no formatting of any kind. Keep every reply short: two to four spoken sentences.
 
-Cooking approach: Work only with the ingredients the user has right now. Never suggest buying anything. Ask one question at a time. Guide one step at a time and wait for them to confirm before moving on. Celebrate small moments naturally — "Perfect, that's exactly right!"
+Language: Detect the language the user speaks and reply in that exact language immediately. If they switch languages mid-conversation, switch with them instantly. Never mention that you switched.
 
-Personality: Warm, patient, never judgmental. You speak to everyone — the tired parent, the student with barely anything in the fridge, the person cooking for a date. Make them feel capable, not overwhelmed.
+How you cook with them: Work only with the ingredients the user already has. Never suggest buying anything. Ask one question at a time. Guide one step at a time and wait for them to confirm before moving on. Celebrate small wins naturally — "Perfect, that's exactly right."
 
-Start every new conversation by warmly greeting the user and asking what ingredients they have right now.`
-const REALTIME_MODEL = 'gpt-4o-realtime-preview'
+Begin every new conversation by warmly greeting the user and asking what ingredients they have right now.`
 
-const REALTIME_URL   = `wss://api.openai.com/v1/realtime?model=${REALTIME_MODEL}`
-
-// ── REST routes ───────────────────────────────────────────────────────────────
-
+// ── Recipe generation ────────────────────────────────────────────────────────
 app.post('/api/recipe/generate', async (req, res) => {
-  const { ingredients } = req.body
+  const { ingredients, language } = req.body || {}
   if (!Array.isArray(ingredients) || ingredients.length === 0) {
     return res.status(400).json({ error: 'ingredients array required' })
   }
   if (!process.env.OPENAI_API_KEY) {
     return res.status(503).json({ error: 'OPENAI_API_KEY not configured' })
   }
+  const lang = typeof language === 'string' && language.trim() ? language.trim() : 'English'
+
   try {
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o',
@@ -55,61 +56,49 @@ app.post('/api/recipe/generate', async (req, res) => {
       messages: [
         {
           role: 'system',
-          content: `Generate one realistic recipe using ONLY the provided ingredients. Return strict JSON:
+          content: `You are Micheli, a warm professional chef. Create ONE realistic recipe using ONLY the provided ingredients (you may assume basic staples: salt, pepper, oil, water). Never require buying additional main ingredients. Write everything in ${lang}.
+Return STRICT JSON in exactly this shape:
 {
-  "title": "",
-  "time": "",
-  "difficulty": "Easy" | "Medium" | "Hard",
-  "serves": "",
-  "ingredients": [],
-  "steps": ["Full sentence steps, no numbering"],
-  "nutrition": "",
-  "tip": "One concise sentence"
-}
-Never suggest buying additional ingredients.`,
+  "title": "string",
+  "description": "one warm inviting sentence",
+  "ingredients": ["item with a rough quantity"],
+  "steps": ["full sentence step, no numbering"],
+  "cook_time_minutes": 25,
+  "servings": 2,
+  "tags": ["short", "lowercase", "tags"],
+  "tip": "one concise helpful sentence"
+}`,
         },
         { role: 'user', content: `Ingredients: ${ingredients.join(', ')}` },
       ],
     })
-    res.json(JSON.parse(completion.choices[0].message.content || '{}'))
+
+    const raw = JSON.parse(completion.choices[0].message.content || '{}')
+    const toInt = (v) => {
+      const n = parseInt(v, 10)
+      return Number.isFinite(n) ? n : null
+    }
+    res.json({
+      title: String(raw.title || 'A simple dish'),
+      description: String(raw.description || ''),
+      ingredients: Array.isArray(raw.ingredients) ? raw.ingredients.map(String) : [],
+      steps: Array.isArray(raw.steps) ? raw.steps.map(String) : [],
+      cook_time_minutes: toInt(raw.cook_time_minutes),
+      servings: toInt(raw.servings),
+      tags: Array.isArray(raw.tags) ? raw.tags.map(String).slice(0, 5) : [],
+      tip: String(raw.tip || ''),
+    })
   } catch (err) {
+    console.error('[recipe] error:', err.message)
     res.status(err.status || 500).json({ error: err.message })
   }
 })
 
-app.post('/chat', async (req, res) => {
-  const { messages, model, temperature, max_tokens } = req.body
-  if (!process.env.OPENAI_API_KEY) {
-    return res.status(500).json({ error: 'Missing OPENAI_API_KEY' })
-  }
-  try {
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: model || 'gpt-4o-mini',
-        messages,
-        temperature: temperature || 0.7,
-        max_tokens: max_tokens || 1000,
-      }),
-    })
-    res.status(200).json(await response.json())
-  } catch (err) {
-    res.status(500).json({ error: 'Chat request failed: ' + err.message })
-  }
-})
-
-app.get('/token', (_req, res) => res.json({ success: true }))
-
 app.get('/health', (_req, res) =>
-  res.json({ status: 'ok', apiKey: Boolean(process.env.OPENAI_API_KEY) })
+  res.json({ status: 'ok', model: REALTIME_MODEL, voice: REALTIME_VOICE, apiKey: Boolean(process.env.OPENAI_API_KEY) })
 )
 
 // ── OpenAI Realtime WebSocket proxy ──────────────────────────────────────────
-
 const wss = new WebSocketServer({ server, path: '/ws/realtime' })
 
 wss.on('connection', (browserWs, req) => {
@@ -129,28 +118,33 @@ wss.on('connection', (browserWs, req) => {
   const pending = []
 
   openaiWs.on('open', () => {
-    console.log('[WS] Connected to OpenAI Realtime')
+    console.log(`[WS] Connected to OpenAI Realtime (${REALTIME_MODEL}, voice=${REALTIME_VOICE})`)
     openaiWs.send(JSON.stringify({
       type: 'session.update',
       session: {
-        modalities: ['audio', 'text'],
-        instructions: CHEF_PROMPT,
-        voice: 'shimmer',
-        input_audio_format: 'pcm16',
-        output_audio_format: 'pcm16',
-        input_audio_transcription: { model: 'whisper-1' },
-        turn_detection: {
-          type: 'server_vad',
-          threshold: 0.5,
-          prefix_padding_ms: 300,
-          silence_duration_ms: 600,
+        type: 'realtime',
+        output_modalities: ['audio'],
+        instructions: MICHELI_PROMPT,
+        audio: {
+          input: {
+            format: { type: 'audio/pcm', rate: 24000 },
+            turn_detection: {
+              type: 'server_vad',
+              threshold: 0.5,
+              prefix_padding_ms: 300,
+              silence_duration_ms: 600,
+              create_response: true,
+              interrupt_response: true,
+            },
+            transcription: { model: 'whisper-1' },
+          },
+          output: {
+            format: { type: 'audio/pcm', rate: 24000 },
+            voice: REALTIME_VOICE,
+          },
         },
-        temperature: 0.8,
-        max_response_output_tokens: 'inf',
       },
     }))
-    // Trigger Micheli's opening greeting
-    openaiWs.send(JSON.stringify({ type: 'response.create' }))
     sessionReady = true
     for (const msg of pending) {
       if (openaiWs.readyState === WebSocket.OPEN) openaiWs.send(msg)
@@ -187,13 +181,12 @@ wss.on('connection', (browserWs, req) => {
   browserWs.on('error', (err) => console.error('[WS] Browser error:', err.message))
 })
 
-// ── Static (Vite build) ───────────────────────────────────────────────────────
-
+// ── Static (Vite build) ──────────────────────────────────────────────────────
 app.use(express.static(join(__dirname, 'dist')))
 app.get('*', (_req, res) => res.sendFile(join(__dirname, 'dist', 'index.html')))
 
 server.listen(PORT, () => {
   console.log(`\n  ShareChef AI  →  http://localhost:${PORT}`)
-  console.log(`  Realtime WS   →  ws://localhost:${PORT}/ws/realtime`)
+  console.log(`  Realtime WS   →  /ws/realtime  (${REALTIME_MODEL}, ${REALTIME_VOICE})`)
   console.log(`  API key       →  ${process.env.OPENAI_API_KEY ? '✓ configured' : '✗ MISSING'}\n`)
 })
