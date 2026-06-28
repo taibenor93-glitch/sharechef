@@ -168,9 +168,13 @@ wss.on('connection', (browserWs, req) => {
     if (browserWs.readyState === WebSocket.OPEN) browserWs.close(1000)
   })
 
-  browserWs.on('message', (data, isBinary) => {
-    if (sessionReady && openaiWs.readyState === WebSocket.OPEN) openaiWs.send(data, { binary: isBinary })
-    else pending.push(data)
+  browserWs.on('message', (data) => {
+    // OpenAI's realtime API accepts ONLY text (JSON) frames — never binary.
+    // ws delivers frames as Buffers, so coerce to a string and always send as text,
+    // including queued frames replayed after the session opens.
+    const text = typeof data === 'string' ? data : data.toString('utf8')
+    if (sessionReady && openaiWs.readyState === WebSocket.OPEN) openaiWs.send(text)
+    else pending.push(text)
   })
 
   browserWs.on('close', (code) => {
