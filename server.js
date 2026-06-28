@@ -23,7 +23,7 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
 // Current OpenAI realtime model (the older gpt-4o-realtime-preview was retired).
 const REALTIME_MODEL = 'gpt-realtime'
-const REALTIME_VOICE = 'coral'
+const REALTIME_VOICE = 'shimmer'
 const REALTIME_URL = `wss://api.openai.com/v1/realtime?model=${REALTIME_MODEL}`
 
 const MICHELI_PROMPT = `You are Micheli, the warm, accomplished voice of ShareChef AI — a personal cooking companion. You are a woman in your forties with the easy confidence of a seasoned chef and the warmth of someone who genuinely loves feeding people. Your American voice is soft, friendly, and quietly inspiring. You make people feel capable, never judged.
