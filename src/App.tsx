@@ -1,5 +1,5 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
-import { useSession } from './hooks/useSession'
+import { useAuth } from './hooks/useAuth'
 import { Layout } from './components/Layout'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import { LoginPage } from './pages/Login'
@@ -9,7 +9,7 @@ import { SavedListPage } from './pages/SavedList'
 import { SavedDetailPage } from './pages/SavedDetail'
 
 export default function App() {
-  const { session, loading } = useSession()
+  const { authed, loading } = useAuth()
 
   if (loading) {
     return (
@@ -22,8 +22,8 @@ export default function App() {
 
   return (
     <Routes>
-      <Route path="/login" element={session ? <Navigate to="/" replace /> : <LoginPage />} />
-      <Route path="/signup" element={session ? <Navigate to="/" replace /> : <SignupPage />} />
+      <Route path="/login" element={authed ? <Navigate to="/" replace /> : <LoginPage />} />
+      <Route path="/signup" element={authed ? <Navigate to="/" replace /> : <SignupPage />} />
       <Route
         element={
           <ProtectedRoute>

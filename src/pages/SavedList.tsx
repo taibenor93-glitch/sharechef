@@ -1,14 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
-import { useSession } from '../hooks/useSession'
+import { useAuth } from '../hooks/useAuth'
 import type { Recipe } from '../types/recipe'
 
 type SortMode = 'recent' | 'title'
 
 export function SavedListPage() {
-  const { session } = useSession()
-  const uid = session?.user.id
+  const { userId } = useAuth()
   const [recipes, setRecipes] = useState<Recipe[]>([])
   const [loading, setLoading] = useState(true)
   const [q, setQ] = useState('')
@@ -17,20 +16,20 @@ export function SavedListPage() {
 
   useEffect(() => {
     const run = async () => {
-      if (!uid) return
+      if (!userId) { setRecipes([]); setLoading(false); return }
       setLoading(true)
       setError(null)
       const { data, error } = await supabase
         .from('recipes')
         .select('*')
-        .eq('user_id', uid)
+        .eq('user_id', userId)
         .order('created_at', { ascending: false })
       setLoading(false)
       if (error) return setError(error.message)
       setRecipes((data ?? []) as Recipe[])
     }
     run()
-  }, [uid])
+  }, [userId])
 
   const filtered = useMemo(() => {
     const query = q.trim().toLowerCase()
@@ -46,6 +45,27 @@ export function SavedListPage() {
     else rows.sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? ''))
     return rows
   }, [recipes, q, sort])
+
+  if (!userId) {
+    return (
+      <div className="container stack">
+        <div className="hero-head" style={{ textAlign: 'left' }}>
+          <div className="eyebrow">Your cookbook</div>
+          <h1 className="page-title">My recipes</h1>
+        </div>
+        <div className="card empty">
+          <div className="empty-mark">🔖</div>
+          <div className="section-title">Sign in to build your cookbook</div>
+          <div className="muted" style={{ marginTop: 6 }}>
+            You're cooking as a guest. Create a free account to save recipes and earn your Micheli Star.
+          </div>
+          <div style={{ marginTop: 16 }}>
+            <Link to="/login" className="btn btn-primary">Sign in or create account</Link>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="container stack">

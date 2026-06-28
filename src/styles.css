@@ -153,6 +153,8 @@ input::placeholder { color: var(--muted); }
 .auth-sub { color: var(--ink-soft); font-size: 14px; }
 .auth-alt { text-align: center; color: var(--muted); font-size: 14px; margin-top: 16px; }
 .auth-alt a { color: var(--amber); font-weight: 600; }
+.or-divider { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px; margin: 2px 0; }
+.or-divider::before, .or-divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
 
 /* ---------- home / voice ---------- */
 .hero-head { text-align: center; margin: 6px 0 8px; }

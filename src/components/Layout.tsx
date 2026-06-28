@@ -1,11 +1,14 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
+import { useAuth, setGuest } from '../hooks/useAuth'
 
 export function Layout() {
   const nav = useNavigate()
+  const { session, guest } = useAuth()
 
-  const signOut = async () => {
-    await supabase.auth.signOut()
+  const leave = async () => {
+    if (session) await supabase.auth.signOut()
+    setGuest(false)
     nav('/login', { replace: true })
   }
 
@@ -23,8 +26,8 @@ export function Layout() {
           <nav className="nav">
             <NavLink to="/" end className={linkClass}>Cook</NavLink>
             <NavLink to="/saved" className={linkClass}>My recipes</NavLink>
-            <button type="button" className="nav-link nav-signout" onClick={signOut}>
-              Sign out
+            <button type="button" className="nav-link nav-signout" onClick={leave}>
+              {guest && !session ? 'Sign in' : 'Sign out'}
             </button>
           </nav>
         </div>

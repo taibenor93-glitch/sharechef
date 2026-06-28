@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
-import { useSession } from '../hooks/useSession'
+import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../hooks/useAuth'
 import { supabase } from '../lib/supabaseClient'
 import { RealtimeVoice } from '../voice/realtimeVoice'
 import type { VoiceStatus } from '../voice/realtimeVoice'
@@ -25,8 +26,8 @@ const STATUS_LABEL: Record<VoiceStatus, string> = {
 }
 
 export function HomePage() {
-  const { session } = useSession()
-  const uid = session?.user.id
+  const { userId } = useAuth()
+  const nav = useNavigate()
 
   // ── voice ──
   const voiceRef = useRef<RealtimeVoice | null>(null)
@@ -72,14 +73,14 @@ export function HomePage() {
   }, [lines])
 
   const loadCount = async () => {
-    if (!uid) return
+    if (!userId) { setSavedCount(0); return }
     const { count } = await supabase
       .from('recipes')
       .select('*', { count: 'exact', head: true })
-      .eq('user_id', uid)
+      .eq('user_id', userId)
     setSavedCount(count ?? 0)
   }
-  useEffect(() => { loadCount() /* eslint-disable-line */ }, [uid])
+  useEffect(() => { loadCount() /* eslint-disable-line */ }, [userId])
 
   const toggleVoice = async () => {
     const v = voiceRef.current
@@ -122,10 +123,11 @@ export function HomePage() {
   }
 
   const onSave = async () => {
-    if (!recipe || !uid) return
+    if (!recipe) return
+    if (!userId) { nav('/login'); return } // guests sign in to save
     setSaveState('saving')
     const { error } = await supabase.from('recipes').insert({
-      user_id: uid,
+      user_id: userId,
       title: recipe.title,
       description: recipe.description || null,
       ingredients: recipe.ingredients,
@@ -159,9 +161,11 @@ export function HomePage() {
         <div className="grow">
           <div className="star-tier">Micheli Star: {star.tier.name}</div>
           <div className="star-sub">
-            {star.next
-              ? `${star.toNext} more saved ${star.toNext === 1 ? 'recipe' : 'recipes'} to reach ${star.next.name}`
-              : 'Top tier reached — a star is earned.'}
+            {!userId
+              ? 'Sign in to track your Micheli Star and save recipes.'
+              : star.next
+                ? `${star.toNext} more saved ${star.toNext === 1 ? 'recipe' : 'recipes'} to reach ${star.next.name}`
+                : 'Top tier reached — a star is earned.'}
           </div>
           <div className="star-bar"><div className="star-fill" style={{ width: `${Math.round(star.progress * 100)}%` }} /></div>
         </div>
@@ -283,7 +287,11 @@ export function HomePage() {
               onClick={onSave}
               disabled={saveState !== 'idle'}
             >
-              {saveState === 'saving' ? 'Saving…' : saveState === 'saved' ? 'Saved ✓' : 'Save to my recipes'}
+              {saveState === 'saving'
+                ? 'Saving…'
+                : saveState === 'saved'
+                  ? 'Saved ✓'
+                  : userId ? 'Save to my recipes' : 'Sign in to save'}
             </button>
           </div>
         </div>

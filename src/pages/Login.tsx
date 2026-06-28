@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
+import { setGuest } from '../hooks/useAuth'
 
 export function LoginPage() {
   const nav = useNavigate()
@@ -17,6 +18,11 @@ export function LoginPage() {
     const { error } = await supabase.auth.signInWithPassword({ email, password })
     setBusy(false)
     if (error) return setError(error.message)
+    nav('/', { replace: true })
+  }
+
+  const continueAsGuest = () => {
+    setGuest(true)
     nav('/', { replace: true })
   }
 
@@ -57,6 +63,15 @@ export function LoginPage() {
           <button className="btn btn-primary btn-block" disabled={busy}>
             {busy ? 'Signing in…' : 'Sign in'}
           </button>
+
+          <div className="or-divider"><span>or</span></div>
+
+          <button type="button" className="btn btn-ghost btn-block" onClick={continueAsGuest}>
+            Continue as guest
+          </button>
+          <div className="muted" style={{ fontSize: 12, textAlign: 'center' }}>
+            Cook and talk to Micheli right away. Create an account anytime to save recipes.
+          </div>
         </form>
 
         <div className="auth-alt">
