@@ -2,6 +2,8 @@
 // Talks to the server proxy at /ws/realtime, which bridges to OpenAI's
 // current `gpt-realtime` model. Audio is PCM16 @ 24kHz both ways.
 
+import { WS_BASE } from '../lib/apiBase'
+
 export type VoiceStatus = 'idle' | 'connecting' | 'ready' | 'listening' | 'processing' | 'speaking'
 
 export interface VoiceCallbacks {
@@ -38,8 +40,7 @@ export class RealtimeVoice {
 
   connect(): void {
     if (this.ws && this.ws.readyState <= WebSocket.OPEN) return
-    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
-    this.ws = new WebSocket(`${protocol}//${location.host}/ws/realtime`)
+    this.ws = new WebSocket(`${WS_BASE}/ws/realtime`)
     this.cb.onStatus('connecting')
     this.ws.onopen = () => this.cb.onStatus('ready')
     this.ws.onmessage = (e) => this.handleEvent(JSON.parse(e.data as string))
@@ -75,7 +76,10 @@ export class RealtimeVoice {
     if (this.isListening) return
     try {
       if (!this.micStream) {
-        this.micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+        this.micStream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+          video: false,
+        })
       }
       if (!this.audioCtx) {
         this.audioCtx = new (
