@@ -105,7 +105,10 @@ export class RealtimeVoice {
       this.cb.onStatus('listening')
     } catch (err: any) {
       console.error('startListening failed:', err?.name, err?.message)
-      this.cb.onError(`Mic error: ${err?.name ?? 'unknown'} — ${err?.message ?? ''}`)
+      const friendly = err?.name === 'NotAllowedError'
+        ? 'Micheli needs microphone access. Enable it in Settings > ShareChef > Microphone.'
+        : 'Voice is unavailable right now. Tap the mic to try again.'
+      this.cb.onError(friendly)
       this.cb.onStatus('ready')
     }
   }
