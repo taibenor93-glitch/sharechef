@@ -1,4 +1,5 @@
 // Client for the server recipe generator. Shape maps directly to the `recipes` table.
+import { API_BASE } from './apiBase'
 export interface GeneratedRecipe {
   title: string
   description: string
@@ -14,7 +15,7 @@ export async function generateRecipe(
   ingredients: string[],
   language = 'English'
 ): Promise<GeneratedRecipe> {
-  const res = await fetch('/api/recipe/generate', {
+  const res = await fetch(`${API_BASE}/api/recipe/generate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ingredients, language }),
