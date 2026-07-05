@@ -17,6 +17,7 @@ export class RealtimeVoice {
   private audioCtx: AudioContext | null = null
   private playbackCtx: AudioContext | null = null
   private micStream: MediaStream | null = null
+  private sourceNode: MediaStreamAudioSourceNode | null = null
   private processorNode: AudioWorkletNode | null = null
   private isPlayingAudio = false
   private nextPlayTime = 0
@@ -64,6 +65,9 @@ export class RealtimeVoice {
       this.micStream.getTracks().forEach((t) => t.stop())
       this.micStream = null
     }
+    // Close audio contexts so their memory is fully reclaimed between sessions.
+    if (this.audioCtx) { this.audioCtx.close().catch(() => {}); this.audioCtx = null }
+    if (this.playbackCtx) { this.playbackCtx.close().catch(() => {}); this.playbackCtx = null }
     this.cb.onStatus('idle')
   }
 
@@ -89,18 +93,19 @@ export class RealtimeVoice {
       }
       if (this.audioCtx!.state === 'suspended') await this.audioCtx!.resume()
 
-      const source = this.audioCtx!.createMediaStreamSource(this.micStream!)
+      this.sourceNode = this.audioCtx!.createMediaStreamSource(this.micStream!)
       this.processorNode = new AudioWorkletNode(this.audioCtx!, 'pcm-audio-processor', {
         processorOptions: { inputRate: this.audioCtx!.sampleRate },
       })
       this.processorNode.port.onmessage = (event) => this.onAudioChunk(event.data as ArrayBuffer)
-      source.connect(this.processorNode)
+      this.sourceNode.connect(this.processorNode)
       this.processorNode.connect(this.audioCtx!.destination)
 
       this.isListening = true
       this.cb.onStatus('listening')
-    } catch {
-      this.cb.onError('Mic access denied. Please allow the microphone in your browser settings.')
+    } catch (err: any) {
+      console.error('startListening failed:', err?.name, err?.message)
+      this.cb.onError(`Mic error: ${err?.name ?? 'unknown'} — ${err?.message ?? ''}`)
       this.cb.onStatus('ready')
     }
   }
@@ -111,6 +116,12 @@ export class RealtimeVoice {
       this.processorNode.port.onmessage = null
       this.processorNode.disconnect()
       this.processorNode = null
+    }
+    // Disconnect the mic source node every cycle — otherwise a new one leaks on
+    // each listen turn and iOS eventually jetsam-kills the app for memory.
+    if (this.sourceNode) {
+      this.sourceNode.disconnect()
+      this.sourceNode = null
     }
   }
 
