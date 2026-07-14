@@ -74,11 +74,11 @@ export function HomePage() {
 
   const loadCount = async () => {
     if (!userId) { setSavedCount(0); return }
-    const { count } = await supabase
-      .from('recipes')
-      .select('*', { count: 'exact', head: true })
-      .eq('user_id', userId)
-    setSavedCount(count ?? 0)
+    const [recipesRes, sharesRes] = await Promise.all([
+      supabase.from('recipes').select('*', { count: 'exact', head: true }).eq('user_id', userId),
+      supabase.from('shares').select('*', { count: 'exact', head: true }).eq('user_id', userId),
+    ])
+    setSavedCount((recipesRes.count ?? 0) + (sharesRes.count ?? 0))
   }
   useEffect(() => { loadCount() /* eslint-disable-line */ }, [userId])
 
