@@ -132,9 +132,9 @@ wss.on('connection', (browserWs, req) => {
             format: { type: 'audio/pcm', rate: 24000 },
             turn_detection: {
               type: 'server_vad',
-              threshold: 0.5,
+              threshold: 0.6,
               prefix_padding_ms: 300,
-              silence_duration_ms: 600,
+              silence_duration_ms: 1000,
               create_response: true,
               interrupt_response: true,
             },
