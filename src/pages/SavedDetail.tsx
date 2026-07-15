@@ -45,6 +45,21 @@ export function SavedDetailPage() {
   const waHref = `https://wa.me/?text=${enc(`${shareText} ${APP_LINK}`)}`
   const xHref = `https://twitter.com/intent/tweet?text=${enc(shareText)}&url=${enc(APP_LINK)}`
   const fbHref = `https://www.facebook.com/sharer/sharer.php?u=${enc(APP_LINK)}`
+  const liHref = `https://www.linkedin.com/sharing/share-offsite/?url=${enc(APP_LINK)}`
+
+  const copyAndOpen = async (channel: ShareChannel, appUrl: string) => {
+    setShareMsg(null)
+    try {
+      await navigator.clipboard.writeText(`${shareText} ${APP_LINK}`)
+    } catch { /* clipboard blocked — still open the app */ }
+    window.open(appUrl, '_blank', 'noopener,noreferrer')
+    const earned = await recordShare(channel, id ?? null)
+    setShareMsg(
+      earned
+        ? '⭐ +1 Micheli Star — caption copied, paste it in your post!'
+        : 'Caption copied — paste it in your post! Sign in to earn Micheli Stars.'
+    )
+  }
 
   const trackShare = async (channel: ShareChannel) => {
     const earned = await recordShare(channel, id ?? null)
@@ -119,6 +134,9 @@ export function SavedDetailPage() {
               <a className="btn btn-ghost" href={waHref} target="_blank" rel="noopener noreferrer" onClick={() => trackShare('whatsapp')}>WhatsApp</a>
               <a className="btn btn-ghost" href={xHref} target="_blank" rel="noopener noreferrer" onClick={() => trackShare('x')}>X</a>
               <a className="btn btn-ghost" href={fbHref} target="_blank" rel="noopener noreferrer" onClick={() => trackShare('facebook')}>Facebook</a>
+              <a className="btn btn-ghost" href={liHref} target="_blank" rel="noopener noreferrer" onClick={() => trackShare('linkedin')}>LinkedIn</a>
+              <button type="button" className="btn btn-ghost" onClick={() => copyAndOpen('instagram', 'https://www.instagram.com/')}>Instagram</button>
+              <button type="button" className="btn btn-ghost" onClick={() => copyAndOpen('tiktok', 'https://www.tiktok.com/')}>TikTok</button>
             </div>
             {shareMsg && <div className="muted" style={{ marginTop: 4 }}>{shareMsg}</div>}
           </div>

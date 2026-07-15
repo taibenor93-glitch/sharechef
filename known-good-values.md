@@ -14,14 +14,17 @@ adopts it), update the entry here first, then use it.
 
 ## AI provider and models
 
-| Purpose            | Canonical value | Status  |
-|--------------------|-----------------|---------|
-| Provider           | OpenAI          | confirm |
-| Chat model         | gpt-4o          | confirm |
-| Text-to-speech     | tts-1           | confirm |
-| TTS voice          | nova            | confirm |
+| Purpose              | Canonical value | Status              |
+|----------------------|-----------------|---------------------|
+| Provider             | OpenAI          | ratified 2026-07-14 |
+| Recipe/chat model    | gpt-4o          | ratified 2026-07-14 |
+| Realtime voice model | gpt-realtime    | ratified 2026-07-14 |
+| Realtime voice       | shimmer         | ratified 2026-07-14 |
+| Voice transcription  | whisper-1       | ratified 2026-07-14 |
 
 Note: Gemini was abandoned. Do not reintroduce Gemini model strings.
+Note: The old TTS pipeline (tts-1 model, nova voice) was retired when voice
+moved to the OpenAI Realtime API. Do not reintroduce tts-1 or nova.
 
 ## Environment variables
 
