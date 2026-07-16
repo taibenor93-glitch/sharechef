@@ -1,18 +1,18 @@
 :root {
   color-scheme: dark;
-  --bg: #141009;
-  --bg-2: #1b1610;
+  --bg: #201122;
+  --bg-2: #2a1630;
   --panel: rgba(255, 255, 255, 0.045);
   --panel-2: rgba(255, 255, 255, 0.07);
   --border: rgba(255, 255, 255, 0.10);
   --border-strong: rgba(255, 255, 255, 0.18);
   --ink: #f6efe4;
-  --ink-soft: #cdbfac;
-  --muted: #9b8f7c;
-  --amber: #e8a33d;
-  --amber-2: #f6c674;
-  --amber-soft: rgba(232, 163, 61, 0.14);
-  --amber-glow: rgba(232, 163, 61, 0.45);
+  --ink-soft: #d6c5d0;
+  --muted: #a492a2;
+  --amber: #d8ab5c;
+  --amber-2: #ecca8b;
+  --amber-soft: rgba(216, 171, 92, 0.14);
+  --amber-glow: rgba(216, 171, 92, 0.45);
   --danger: #e57368;
   --ok: #7bbf86;
   --radius: 20px;
@@ -29,8 +29,8 @@ body {
   font-family: var(--sans);
   color: var(--ink);
   background:
-    radial-gradient(1100px 700px at 78% -8%, rgba(232, 163, 61, 0.16), transparent 60%),
-    radial-gradient(900px 600px at 5% 8%, rgba(232, 163, 61, 0.06), transparent 55%),
+    radial-gradient(1100px 700px at 78% -8%, rgba(216, 171, 92, 0.16), transparent 60%),
+    radial-gradient(900px 600px at 5% 8%, rgba(216, 171, 92, 0.06), transparent 55%),
     linear-gradient(180deg, var(--bg-2), var(--bg) 60%);
   background-attachment: fixed;
   -webkit-font-smoothing: antialiased;
@@ -59,7 +59,7 @@ ul, ol { margin: 0; padding-left: 1.15rem; }
 .topbar {
   position: sticky; top: 0; z-index: 20;
   backdrop-filter: blur(14px);
-  background: linear-gradient(180deg, rgba(20, 16, 9, 0.85), rgba(20, 16, 9, 0.55));
+  background: linear-gradient(180deg, rgba(32, 17, 34, 0.85), rgba(32, 17, 34, 0.55));
   border-bottom: 1px solid var(--border);
 }
 .topbar-inner {
@@ -126,7 +126,7 @@ input::placeholder { color: var(--muted); }
 }
 .btn:active { transform: translateY(1px); }
 .btn:disabled { opacity: .55; cursor: not-allowed; }
-.btn-primary { background: linear-gradient(180deg, var(--amber-2), var(--amber)); color: #271a07; }
+.btn-primary { background: linear-gradient(180deg, var(--amber-2), var(--amber)); color: #2b152d; }
 .btn-primary:hover:not(:disabled) { filter: brightness(1.05); }
 .btn-ghost { background: var(--panel); color: var(--ink); border-color: var(--border); }
 .btn-ghost:hover:not(:disabled) { background: var(--panel-2); }
@@ -161,9 +161,9 @@ input::placeholder { color: var(--muted); }
 .voice-stage { display: flex; flex-direction: column; align-items: center; gap: 14px; margin: 26px 0 8px; }
 .orb {
   position: relative; width: 168px; height: 168px; border-radius: 50%;
-  border: none; cursor: pointer; color: #2a1c06;
-  background: radial-gradient(circle at 32% 28%, var(--amber-2), var(--amber) 62%, #b9781f 100%);
-  box-shadow: 0 0 0 0 var(--amber-glow), 0 18px 50px rgba(232, 163, 61, 0.35);
+  border: none; cursor: pointer; color: #2b152d;
+  background: radial-gradient(circle at 32% 28%, var(--amber-2), var(--amber) 62%, #b8893f 100%);
+  box-shadow: 0 0 0 0 var(--amber-glow), 0 18px 50px rgba(216, 171, 92, 0.35);
   display: grid; place-items: center; transition: transform .15s, box-shadow .2s;
 }
 .orb:hover { transform: translateY(-2px); }
@@ -173,9 +173,9 @@ input::placeholder { color: var(--muted); }
 .orb.is-listening { animation: ring 1.6s ease-out infinite; }
 .orb.is-speaking { animation: speak 0.9s ease-in-out infinite; }
 .orb.is-processing { animation: pulse 1.4s ease-in-out infinite; filter: saturate(0.8); }
-@keyframes breathe { 0%,100% { box-shadow: 0 0 0 0 var(--amber-glow), 0 18px 50px rgba(232,163,61,.30);} 50% { box-shadow: 0 0 0 10px rgba(232,163,61,0), 0 22px 60px rgba(232,163,61,.42);} }
+@keyframes breathe { 0%,100% { box-shadow: 0 0 0 0 var(--amber-glow), 0 18px 50px rgba(216,171,92,.30);} 50% { box-shadow: 0 0 0 10px rgba(216,171,92,0), 0 22px 60px rgba(216,171,92,.42);} }
 @keyframes pulse { 0%,100% { transform: scale(1);} 50% { transform: scale(1.05);} }
-@keyframes ring { 0% { box-shadow: 0 0 0 0 var(--amber-glow);} 100% { box-shadow: 0 0 0 28px rgba(232,163,61,0);} }
+@keyframes ring { 0% { box-shadow: 0 0 0 0 var(--amber-glow);} 100% { box-shadow: 0 0 0 28px rgba(216,171,92,0);} }
 @keyframes speak { 0%,100% { transform: scale(1);} 50% { transform: scale(1.08);} }
 .orb-label { font-family: var(--display); font-size: 18px; letter-spacing: .2px; }
 .voice-status { color: var(--ink-soft); font-size: 14px; min-height: 20px; }
@@ -186,7 +186,7 @@ input::placeholder { color: var(--muted); }
 .star-card { display: flex; align-items: center; gap: 16px; }
 .star-badge {
   width: 54px; height: 54px; border-radius: 16px; flex: none; display: grid; place-items: center;
-  background: var(--amber-soft); border: 1px solid rgba(232,163,61,.35); color: var(--amber-2); font-size: 24px;
+  background: var(--amber-soft); border: 1px solid rgba(216,171,92,.35); color: var(--amber-2); font-size: 24px;
 }
 .star-tier { font-family: var(--display); font-size: 18px; font-weight: 600; }
 .star-sub { color: var(--muted); font-size: 13px; margin-top: 1px; }
@@ -212,13 +212,13 @@ input::placeholder { color: var(--muted); }
 .recipe-cols h4 { font-size: 13px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--amber); margin: 0 0 8px; }
 .recipe-cols li { margin-bottom: 7px; color: var(--ink-soft); }
 .recipe-cols li::marker { color: var(--amber); }
-.tip { margin-top: 16px; padding: 12px 14px; border-radius: var(--radius-sm); background: var(--amber-soft); border: 1px solid rgba(232,163,61,.3); color: var(--ink); font-size: 14px; }
+.tip { margin-top: 16px; padding: 12px 14px; border-radius: var(--radius-sm); background: var(--amber-soft); border: 1px solid rgba(216,171,92,.3); color: var(--ink); font-size: 14px; }
 hr.sep { border: 0; border-top: 1px solid var(--border); margin: 18px 0; }
 
 /* ---------- conversation ---------- */
 .convo { display: flex; flex-direction: column; gap: 10px; max-height: 320px; overflow-y: auto; }
 .bubble { padding: 11px 14px; border-radius: 14px; font-size: 14px; line-height: 1.5; max-width: 88%; }
-.bubble-user { align-self: flex-end; background: linear-gradient(180deg, var(--amber-2), var(--amber)); color: #2a1c06; border-bottom-right-radius: 5px; }
+.bubble-user { align-self: flex-end; background: linear-gradient(180deg, var(--amber-2), var(--amber)); color: #2b152d; border-bottom-right-radius: 5px; }
 .bubble-chef { align-self: flex-start; background: var(--panel-2); border: 1px solid var(--border); border-bottom-left-radius: 5px; }
 .convo-empty { color: var(--muted); font-size: 14px; }
 
