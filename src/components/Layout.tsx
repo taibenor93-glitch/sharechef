@@ -35,6 +35,24 @@ export function Layout() {
       <main className="main">
         <Outlet />
       </main>
+      <footer
+        style={{
+          borderTop: '1px solid var(--border)',
+          padding: '18px 20px 26px',
+          display: 'flex',
+          gap: 20,
+          justifyContent: 'center',
+          alignItems: 'center',
+          color: 'var(--muted)',
+          fontSize: 13,
+          flexWrap: 'wrap',
+        }}
+      >
+        <NavLink to="/about" className="link-btn" style={{ textDecoration: 'none' }}>About</NavLink>
+        <NavLink to="/faq" className="link-btn" style={{ textDecoration: 'none' }}>FAQ</NavLink>
+        <NavLink to="/pricing" className="link-btn" style={{ textDecoration: 'none' }}>Pricing</NavLink>
+        <span>© {new Date().getFullYear()} ShareChef</span>
+      </footer>
     </div>
   )
 }

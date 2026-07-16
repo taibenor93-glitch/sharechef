@@ -7,6 +7,9 @@ import { SignupPage } from './pages/Signup'
 import { HomePage } from './pages/Home'
 import { SavedListPage } from './pages/SavedList'
 import { SavedDetailPage } from './pages/SavedDetail'
+import { AboutPage } from './pages/About'
+import { FAQPage } from './pages/FAQ'
+import { PricingPage } from './pages/Pricing'
 
 export default function App() {
   const { authed, loading } = useAuth()
@@ -24,6 +27,11 @@ export default function App() {
     <Routes>
       <Route path="/login" element={authed ? <Navigate to="/" replace /> : <LoginPage />} />
       <Route path="/signup" element={authed ? <Navigate to="/" replace /> : <SignupPage />} />
+      <Route element={<Layout />}>
+        <Route path="/about" element={<AboutPage />} />
+        <Route path="/faq" element={<FAQPage />} />
+        <Route path="/pricing" element={<PricingPage />} />
+      </Route>
       <Route
         element={
           <ProtectedRoute>
