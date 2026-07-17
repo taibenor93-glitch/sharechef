@@ -16,23 +16,23 @@ export function AboutPage() {
           A year ago, our founder Tai had a simple thought standing in front of an
           open fridge: what if anyone could cook a real dinner with whatever is
           already in there? No shopping trips, no recipes to scroll through, no
-          stress — just a warm voice guiding you, like a friend standing beside
+          stress. Just a warm voice guiding you, like a friend standing beside
           you at the stove.
         </p>
         <p>
-          That voice became <strong>Micheli</strong> — a personal chef who listens
+          That voice became <strong>Micheli</strong>, a personal chef who listens
           to what you have, builds a meal around it, and walks you through every
           step out loud, hands free. She never judges, never asks you to buy
           anything, and she celebrates with you when it works.
         </p>
         <p>
-          ShareChef was built independently — no company, no team — because we
+          ShareChef was built independently. No company, no team. We
           believe a personal chef shouldn&apos;t be a luxury. Every family, every
           student, every busy parent staring at the fridge at 7pm deserves one.
         </p>
         <p>
           We&apos;re just getting started. Save your favorite recipes, share your
-          creations, earn Micheli Stars — and grow from Commis all the way to
+          creations, earn Micheli Stars, and grow from Commis all the way to
           Micheli Chef.
         </p>
       </div>

@@ -52,7 +52,7 @@ export function PricingPage() {
         <div className="eyebrow">Pricing</div>
         <h1 className="page-title">Simple plans, honest promise.</h1>
         <p className="page-sub">
-          During launch, everything is free for our founding families — and the
+          During launch, everything is free for our founding families, and the
           heart of ShareChef will always have a free plan.
         </p>
       </div>
@@ -79,7 +79,7 @@ export function PricingPage() {
       <div className="card-soft" style={{ textAlign: 'center' }}>
         <div className="section-title">Founding families offer</div>
         <p style={{ color: 'var(--ink-soft)', margin: '6px 0 14px' }}>
-          Join now, while everything is free — early members shape what we build next.
+          Join now, while everything is free. Early members shape what we build next.
         </p>
         <Link to="/" className="btn btn-primary">Start cooking free</Link>
       </div>

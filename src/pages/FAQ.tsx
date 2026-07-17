@@ -7,7 +7,7 @@ const FAQS: { q: string; a: string }[] = [
   },
   {
     q: 'Is ShareChef free?',
-    a: 'Yes — during our launch, everything is free for our founding families. Paid plans (Pro and Family) are coming later with extra features, and the heart of ShareChef will always have a free plan.',
+    a: 'Yes. During our launch, everything is free for our founding families. Paid plans (Pro and Family) are coming later with extra features, and the heart of ShareChef will always have a free plan.',
   },
   {
     q: 'Do I need to plan meals or find recipes first?',
@@ -15,10 +15,10 @@ const FAQS: { q: string; a: string }[] = [
   },
   {
     q: 'Which devices does it work on?',
-    a: 'iPhone: download ShareChef AI from the App Store. Android and computers: use the web app in your browser — same Micheli, no installation needed.',
+    a: 'iPhone: download ShareChef AI from the App Store. Android and computers: use the web app in your browser, same Micheli, no installation needed.',
   },
   {
-    q: 'Micheli cannot hear me — what do I do?',
+    q: 'Micheli cannot hear me. What do I do?',
     a: 'Check your microphone permission. On iPhone: Settings → ShareChef AI → Microphone → On. In a browser: tap Allow when the site asks for your microphone, then refresh. Micheli cannot cook with you if she cannot hear you.',
   },
   {
@@ -27,11 +27,11 @@ const FAQS: { q: string; a: string }[] = [
   },
   {
     q: 'Is it safe for kids and beginners?',
-    a: 'Micheli guides one small step at a time and waits for you before moving on — built for first-time cooks. As with any cooking, an adult should decide what is age-appropriate in their own kitchen.',
+    a: 'Micheli guides one small step at a time and waits for you before moving on, built for first-time cooks. As with any cooking, an adult should decide what is age-appropriate in their own kitchen.',
   },
   {
     q: 'How do I share feedback or get help?',
-    a: 'We read everything. Reach out through our social pages, or leave a review on the App Store — early feedback shapes what we build next.',
+    a: 'We read everything. Reach out through our social pages, or leave a review on the App Store. Early feedback shapes what we build next.',
   },
 ]
 
