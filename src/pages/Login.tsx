@@ -77,6 +77,15 @@ export function LoginPage() {
         <div className="auth-alt">
           New to ShareChef? <Link to="/signup">Create an account</Link>
         </div>
+
+        <div
+          className="muted"
+          style={{ display: 'flex', gap: 18, justifyContent: 'center', fontSize: 13, marginTop: 14 }}
+        >
+          <Link to="/about">About</Link>
+          <Link to="/faq">FAQ</Link>
+          <Link to="/pricing">Pricing</Link>
+        </div>
       </div>
     </div>
   )
