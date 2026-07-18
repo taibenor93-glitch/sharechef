@@ -100,6 +100,64 @@ app.get('/health', (_req, res) =>
   res.json({ status: 'ok', model: REALTIME_MODEL, voice: REALTIME_VOICE, apiKey: Boolean(process.env.OPENAI_API_KEY) })
 )
 
+// ── Temporary QA text chat: Micheli in text mode ─────────────────────────────
+// Protected by TEST_CHAT_TOKEN (set only in Railway Variables). If the variable
+// is not set, this endpoint is disabled entirely. Remove this block when QA ends.
+const qaSessions = new Map()
+let qaMessagesToday = 0
+let qaCountDay = ''
+
+app.post('/api/test/chat', async (req, res) => {
+  const secret = process.env.TEST_CHAT_TOKEN
+  if (!secret) return res.status(403).json({ error: 'QA chat disabled' })
+  const auth = req.headers.authorization || ''
+  const token = auth.startsWith('Bearer ') ? auth.slice(7) : (req.body?.token || '')
+  if (token !== secret) return res.status(401).json({ error: 'invalid token' })
+
+  const { session_id, message } = req.body || {}
+  if (!session_id || typeof message !== 'string' || !message.trim()) {
+    return res.status(400).json({ error: 'session_id and message required' })
+  }
+
+  const day = new Date().toISOString().slice(0, 10)
+  if (day !== qaCountDay) { qaCountDay = day; qaMessagesToday = 0 }
+  if (qaMessagesToday >= 400) return res.status(429).json({ error: 'daily test limit reached' })
+  qaMessagesToday++
+
+  if (!qaSessions.has(session_id)) {
+    if (qaSessions.size >= 60) {
+      const oldest = [...qaSessions.entries()].sort((a, b) => a[1].last - b[1].last)[0]
+      if (oldest) qaSessions.delete(oldest[0])
+    }
+    qaSessions.set(session_id, { messages: [], last: Date.now() })
+  }
+  const sess = qaSessions.get(session_id)
+  sess.last = Date.now()
+  sess.messages.push({ role: 'user', content: message.trim().slice(0, 2000) })
+  if (sess.messages.length > 40) sess.messages.splice(0, sess.messages.length - 40)
+
+  try {
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      messages: [
+        {
+          role: 'system',
+          content:
+            MICHELI_PROMPT +
+            '\n\nNote: this is a text conversation for testing. Reply in plain text with the same warm spoken style, two to four sentences.',
+        },
+        ...sess.messages,
+      ],
+    })
+    const reply = completion.choices[0]?.message?.content?.trim() || ''
+    sess.messages.push({ role: 'assistant', content: reply })
+    res.json({ reply, session_id, turns: sess.messages.length })
+  } catch (err) {
+    console.error('[qa-chat] error:', err.message)
+    res.status(err.status || 500).json({ error: err.message })
+  }
+})
+
 // ── OpenAI Realtime WebSocket proxy ──────────────────────────────────────────
 const wss = new WebSocketServer({ server, path: '/ws/realtime' })
 
