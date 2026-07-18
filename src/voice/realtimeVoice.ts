@@ -191,7 +191,7 @@ export class RealtimeVoice {
     if (!this.playbackCtx || !base64) return
     if (!this.isPlayingAudio) {
       this.isPlayingAudio = true
-      this.nextPlayTime = this.playbackCtx.currentTime
+      this.nextPlayTime = this.playbackCtx.currentTime + 0.15
       this.stopListening() // mute mic while Micheli speaks — avoids echo with server VAD
       this.cb.onStatus('speaking')
     }
@@ -206,7 +206,7 @@ export class RealtimeVoice {
     const node = this.playbackCtx.createBufferSource()
     node.buffer = buffer
     node.connect(this.playbackCtx.destination)
-    const startAt = Math.max(this.nextPlayTime, this.playbackCtx.currentTime)
+    const startAt = Math.max(this.nextPlayTime, this.playbackCtx.currentTime + 0.05)
     node.start(startAt)
     this.nextPlayTime = startAt + buffer.duration
   }
