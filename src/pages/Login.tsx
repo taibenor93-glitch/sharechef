@@ -78,6 +78,16 @@ export function LoginPage() {
           New to ShareChef? <Link to="/signup">Create an account</Link>
         </div>
 
+        <a
+          className="app-store-badge"
+          href="https://apps.apple.com/us/app/sharechef-ai/id6787142176"
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Download ShareChef AI on the App Store"
+        >
+          <img src="/app-store-badge.svg" alt="Download on the App Store" width="140" height="47" />
+        </a>
+
         <div
           className="muted"
           style={{ display: 'flex', gap: 18, justifyContent: 'center', fontSize: 13, marginTop: 14 }}

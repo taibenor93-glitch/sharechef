@@ -153,6 +153,13 @@ input::placeholder { color: var(--muted); }
 .auth-sub { color: var(--ink-soft); font-size: 14px; }
 .auth-alt { text-align: center; color: var(--muted); font-size: 14px; margin-top: 16px; }
 .auth-alt a { color: var(--amber); font-weight: 600; }
+.app-store-badge {
+  display: flex; justify-content: center; align-items: center;
+  margin-top: 18px; opacity: 0.92; transition: opacity .15s, transform .08s;
+}
+.app-store-badge:hover { opacity: 1; }
+.app-store-badge:active { transform: translateY(1px); }
+.app-store-badge img { height: 44px; width: auto; }
 .or-divider { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px; margin: 2px 0; }
 .or-divider::before, .or-divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
 
