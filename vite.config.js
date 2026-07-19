@@ -3,6 +3,10 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
+  test: {
+    environment: 'node',
+    include: ['src/**/*.{test,spec}.{js,ts,tsx}', 'server/**/*.{test,spec}.js'],
+  },
   server: {
     proxy: {
       '/ws/realtime': { target: 'ws://localhost:3000', ws: true },

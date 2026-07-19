@@ -6,6 +6,8 @@ import { WebSocketServer, WebSocket } from 'ws'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 import OpenAI from 'openai'
+import { normalizeRecipe } from './server/recipe.js'
+import { QaSessionStore } from './server/qaSessions.js'
 
 dotenv.config()
 
@@ -76,20 +78,7 @@ Return STRICT JSON in exactly this shape:
     })
 
     const raw = JSON.parse(completion.choices[0].message.content || '{}')
-    const toInt = (v) => {
-      const n = parseInt(v, 10)
-      return Number.isFinite(n) ? n : null
-    }
-    res.json({
-      title: String(raw.title || 'A simple dish'),
-      description: String(raw.description || ''),
-      ingredients: Array.isArray(raw.ingredients) ? raw.ingredients.map(String) : [],
-      steps: Array.isArray(raw.steps) ? raw.steps.map(String) : [],
-      cook_time_minutes: toInt(raw.cook_time_minutes),
-      servings: toInt(raw.servings),
-      tags: Array.isArray(raw.tags) ? raw.tags.map(String).slice(0, 5) : [],
-      tip: String(raw.tip || ''),
-    })
+    res.json(normalizeRecipe(raw))
   } catch (err) {
     console.error('[recipe] error:', err.message)
     res.status(err.status || 500).json({ error: err.message })
@@ -103,9 +92,7 @@ app.get('/health', (_req, res) =>
 // ── Temporary QA text chat: Micheli in text mode ─────────────────────────────
 // Protected by TEST_CHAT_TOKEN (set only in Railway Variables). If the variable
 // is not set, this endpoint is disabled entirely. Remove this block when QA ends.
-const qaSessions = new Map()
-let qaMessagesToday = 0
-let qaCountDay = ''
+const qa = new QaSessionStore()
 
 app.post('/api/test/chat', async (req, res) => {
   const secret = process.env.TEST_CHAT_TOKEN
@@ -119,22 +106,10 @@ app.post('/api/test/chat', async (req, res) => {
     return res.status(400).json({ error: 'session_id and message required' })
   }
 
-  const day = new Date().toISOString().slice(0, 10)
-  if (day !== qaCountDay) { qaCountDay = day; qaMessagesToday = 0 }
-  if (qaMessagesToday >= 400) return res.status(429).json({ error: 'daily test limit reached' })
-  qaMessagesToday++
+  if (!qa.consumeDailyQuota()) return res.status(429).json({ error: 'daily test limit reached' })
 
-  if (!qaSessions.has(session_id)) {
-    if (qaSessions.size >= 60) {
-      const oldest = [...qaSessions.entries()].sort((a, b) => a[1].last - b[1].last)[0]
-      if (oldest) qaSessions.delete(oldest[0])
-    }
-    qaSessions.set(session_id, { messages: [], last: Date.now() })
-  }
-  const sess = qaSessions.get(session_id)
-  sess.last = Date.now()
-  sess.messages.push({ role: 'user', content: message.trim().slice(0, 2000) })
-  if (sess.messages.length > 40) sess.messages.splice(0, sess.messages.length - 40)
+  const sess = qa.getOrCreate(session_id)
+  qa.pushUser(sess, message)
 
   try {
     const completion = await openai.chat.completions.create({
@@ -150,7 +125,7 @@ app.post('/api/test/chat', async (req, res) => {
       ],
     })
     const reply = completion.choices[0]?.message?.content?.trim() || ''
-    sess.messages.push({ role: 'assistant', content: reply })
+    qa.pushAssistant(sess, reply)
     res.json({ reply, session_id, turns: sess.messages.length })
   } catch (err) {
     console.error('[qa-chat] error:', err.message)
