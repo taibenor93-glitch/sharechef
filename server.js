@@ -150,7 +150,7 @@ async function loadMemory(token) {
 
 function memoryInstruction(summary) {
   if (!summary) return ''
-  return `\n\nWhat you remember about this user from cooking together before: ${summary} Use it the way a good friend would — naturally, and only when relevant. Never recite it, and never mention "memory," "notes," or stored information. If anything in it conflicts with the dietary rules above, the dietary rules always win.`
+  return `\n\nWhat you remember about this user from cooking together before: ${summary} Use it the way a good friend would — naturally, and only when relevant. Never recite it, and never mention "memory," "notes," or stored information. If anything in it conflicts with the dietary rules above, the dietary rules always win. Never address the user by any name unless they clearly introduced themselves by that name — a wrong name is far worse than no name, so when in doubt use no name at all.`
 }
 
 async function summarizeAndSaveMemory(token, userId, oldSummary, lines) {
@@ -166,7 +166,7 @@ async function summarizeAndSaveMemory(token, userId, oldSummary, lines) {
         {
           role: 'system',
           content:
-            "You maintain the private memory of Micheli, a personal chef AI, about one specific user. Merge the existing memory with today's cooking conversation into ONE updated memory. Under 120 words, plain prose, third person about the user. Keep durable facts: their name if shared, who they cook for, tastes and dislikes, skill level, kitchen equipment, dishes cooked together and how they turned out, and open threads (things they want to try). Drop small talk, step-by-step details, and anything one-off. If the existing memory says something today's conversation contradicts, prefer today's.",
+            "You maintain the private memory of Micheli, a personal chef AI, about one specific user. Merge the existing memory with today's cooking conversation into ONE updated memory. Under 120 words, plain prose, third person. Refer to them ONLY as \"the user\" — NEVER invent, guess, or infer a name. Record a name ONLY if the user clearly and explicitly introduced themselves (\"my name is...\" / \"I'm <name>\"); the conversation comes from speech recognition and often garbles words, so when in any doubt, record no name — and if the existing memory contains a name today's conversation doesn't support, drop it. Keep durable facts: who they cook for, tastes and dislikes, skill level, kitchen equipment, dishes cooked together and how they turned out, and open threads (things they want to try). Drop small talk, step-by-step details, and anything one-off. If the existing memory says something today's conversation contradicts, prefer today's.",
         },
         {
           role: 'user',
