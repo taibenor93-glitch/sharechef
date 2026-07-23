@@ -115,6 +115,64 @@ function resumeInstruction(cookState) {
   return `\n\nEarlier today you were already cooking with this user, then the conversation was interrupted. The last things said were:\n${convo}\n\nInstead of any other opening, begin by warmly picking up where you left off — in one short sentence remind them exactly where you were (the dish and the step), then continue guiding from there. If that earlier conversation clearly shows the dish was finished, ignore it and instead say exactly: "Welcome back! What ingredients are we working with today?" Never reintroduce yourself.`
 }
 
+// ── Long-term memory ─────────────────────────────────────────────────────────
+// After each meaningful voice session, the transcript is distilled into a short
+// rolling summary per user (micheli_memory, own token, RLS). Next session, the
+// summary is folded into Micheli's instructions so she remembers them over time.
+async function loadMemory(token) {
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !token) return null
+  try {
+    const { data, error } = await tokenClient(token)
+      .from('micheli_memory')
+      .select('summary')
+      .maybeSingle()
+    if (error || !data || !data.summary || !data.summary.trim()) return null
+    return data.summary.trim()
+  } catch (err) {
+    console.error('[memory] load failed:', err.message)
+    return null
+  }
+}
+
+function memoryInstruction(summary) {
+  if (!summary) return ''
+  return `\n\nWhat you remember about this user from cooking together before: ${summary} Use it the way a good friend would — naturally, and only when relevant. Never recite it, and never mention "memory," "notes," or stored information. If anything in it conflicts with the dietary rules above, the dietary rules always win.`
+}
+
+async function summarizeAndSaveMemory(token, userId, oldSummary, lines) {
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !token || !userId) return
+  if (!Array.isArray(lines) || lines.length < 4) return // too little happened to remember
+  try {
+    const convo = lines
+      .map((l) => `${l.who === 'user' ? 'User' : 'Micheli'}: ${l.text}`)
+      .join('\n')
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      messages: [
+        {
+          role: 'system',
+          content:
+            "You maintain the private memory of Micheli, a personal chef AI, about one specific user. Merge the existing memory with today's cooking conversation into ONE updated memory. Under 120 words, plain prose, third person about the user. Keep durable facts: their name if shared, who they cook for, tastes and dislikes, skill level, kitchen equipment, dishes cooked together and how they turned out, and open threads (things they want to try). Drop small talk, step-by-step details, and anything one-off. If the existing memory says something today's conversation contradicts, prefer today's.",
+        },
+        {
+          role: 'user',
+          content: `Existing memory:\n${oldSummary || '(none)'}\n\nToday's conversation:\n${convo}`,
+        },
+      ],
+    })
+    const summary = completion.choices[0]?.message?.content?.trim()
+    if (!summary) return
+    await tokenClient(token).from('micheli_memory').upsert({
+      user_id: userId,
+      summary: summary.slice(0, 1500),
+      updated_at: new Date().toISOString(),
+    })
+    console.log(`[memory] updated for user ${userId}`)
+  } catch (err) {
+    console.error('[memory] update failed:', err.message)
+  }
+}
+
 // ── Recipe generation ────────────────────────────────────────────────────────
 app.post('/api/recipe/generate', async (req, res) => {
   const { ingredients, language } = req.body || {}
@@ -346,6 +404,7 @@ wss.on('connection', (browserWs, req) => {
   let profile = null // dietary profile row, null for guests / no restrictions
   let authToken = null // the user's own token — used for their profile + cook-session rows
   let cookState = null // interrupted-cook tail from a recent session, if any
+  let memory = null // long-term summary of past sessions, if any
   const pending = []
 
   // Live transcript of this session (final lines only), used for resume-after-lock.
@@ -375,6 +434,7 @@ wss.on('connection', (browserWs, req) => {
         instructions:
           MICHELI_PROMPT +
           dietaryRules(profile) +
+          memoryInstruction(memory) +
           (cookState ? resumeInstruction(cookState) : greetingInstruction(profile)),
         audio: {
           input: {
@@ -472,12 +532,13 @@ wss.on('connection', (browserWs, req) => {
         user = await verifyUser(parsed.token)
         if (user) {
           authToken = parsed.token
-          ;[profile, cookState] = await Promise.all([
+          ;[profile, cookState, memory] = await Promise.all([
             loadProfile(parsed.token),
             loadCookState(parsed.token),
+            loadMemory(parsed.token),
           ])
         }
-        console.log(`[WS] auth: ${user ? `user ${user.id}` : 'guest'}${profile ? ' (profile loaded)' : ''}${cookState ? ' (resuming cook)' : ''}`)
+        console.log(`[WS] auth: ${user ? `user ${user.id}` : 'guest'}${profile ? ' (profile loaded)' : ''}${cookState ? ' (resuming cook)' : ''}${memory ? ' (memory loaded)' : ''}`)
         authInFlight = false
         startOpenAI()
         return // the auth frame itself is never forwarded to OpenAI
@@ -497,6 +558,8 @@ wss.on('connection', (browserWs, req) => {
     console.log(`[WS] Browser disconnected: ${code}`)
     clearTimeout(authTimer)
     flushCookState() // phone locked / app switched — save where they were
+    // Distill this session into long-term memory (fire and forget).
+    if (user && authToken) summarizeAndSaveMemory(authToken, user.id, memory, transcript.slice())
     if (openaiWs && openaiWs.readyState === WebSocket.OPEN) openaiWs.close(1000)
   })
 
