@@ -61,6 +61,9 @@ export class RealtimeVoice {
   disconnect(): void {
     this.stopListening()
     this.isPlayingAudio = false
+    // Tell the server this is a deliberate goodbye, not an interruption —
+    // a deliberate end closes the cook instead of resuming it next time.
+    this.wsSend({ type: 'bye' })
     if (this.ws) {
       this.ws.onclose = null
       this.ws.close()

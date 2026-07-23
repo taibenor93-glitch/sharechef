@@ -94,6 +94,20 @@ async function loadCookState(token) {
   }
 }
 
+// A deliberate "End session" closes the cook: empty lines mean nothing to resume.
+async function clearCookState(token, userId) {
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !token || !userId) return
+  try {
+    await tokenClient(token).from('cook_sessions').upsert({
+      user_id: userId,
+      lines: [],
+      updated_at: new Date().toISOString(),
+    })
+  } catch (err) {
+    console.error('[cook] clear failed:', err.message)
+  }
+}
+
 async function saveCookState(token, userId, lines) {
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !token || !userId || lines.length === 0) return
   try {
@@ -112,7 +126,7 @@ function resumeInstruction(cookState) {
   const convo = cookState.lines
     .map((l) => `${l.who === 'user' ? 'User' : 'You'}: ${l.text}`)
     .join('\n')
-  return `\n\nEarlier today you were already cooking with this user, then the conversation was interrupted. The last things said were:\n${convo}\n\nInstead of any other opening, begin by warmly picking up where you left off — in one short sentence remind them exactly where you were (the dish and the step), then continue guiding from there. If that earlier conversation clearly shows the dish was finished, ignore it and instead say exactly: "Welcome back! What ingredients are we working with today?" Never reintroduce yourself.`
+  return `\n\nEarlier today you were already cooking with this user, then the conversation was interrupted. The last things said were:\n${convo}\n\nInstead of any other opening, begin by warmly picking up where you left off — in one short sentence remind them exactly where you were (the dish and the step), then continue guiding from there. If that earlier conversation clearly shows the dish was finished, ignore it and instead say exactly: "Welcome back! What ingredients are we working with today?" Never reintroduce yourself, never say your own name, and never say hello as if meeting them — you are mid-conversation with someone you know.`
 }
 
 // ── Long-term memory ─────────────────────────────────────────────────────────
@@ -405,6 +419,7 @@ wss.on('connection', (browserWs, req) => {
   let authToken = null // the user's own token — used for their profile + cook-session rows
   let cookState = null // interrupted-cook tail from a recent session, if any
   let memory = null // long-term summary of past sessions, if any
+  let deliberateEnd = false // user tapped "End session" — close the cook, don't resume it
   const pending = []
 
   // Live transcript of this session (final lines only), used for resume-after-lock.
@@ -522,6 +537,13 @@ wss.on('connection', (browserWs, req) => {
     // including queued frames replayed after the session opens.
     const text = typeof data === 'string' ? data : data.toString('utf8')
 
+    // A tiny "bye" frame marks a deliberate End-session tap; never forward it.
+    if (text.length < 60 && text.includes('"bye"')) {
+      try {
+        if (JSON.parse(text).type === 'bye') { deliberateEnd = true; return }
+      } catch { /* fall through — treat as a normal frame */ }
+    }
+
     if (!started) {
       if (authInFlight) { pending.push(text); return } // frames racing the token check
       let parsed = null
@@ -557,8 +579,12 @@ wss.on('connection', (browserWs, req) => {
   browserWs.on('close', (code) => {
     console.log(`[WS] Browser disconnected: ${code}`)
     clearTimeout(authTimer)
-    flushCookState() // phone locked / app switched — save where they were
-    // Distill this session into long-term memory (fire and forget).
+    if (deliberateEnd) {
+      if (user && authToken) clearCookState(authToken, user.id) // ended on purpose — nothing to resume
+    } else {
+      flushCookState() // phone locked / app switched — save where they were
+    }
+    // Either way, distill this session into long-term memory (fire and forget).
     if (user && authToken) summarizeAndSaveMemory(authToken, user.id, memory, transcript.slice())
     if (openaiWs && openaiWs.readyState === WebSocket.OPEN) openaiWs.close(1000)
   })
