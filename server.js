@@ -63,6 +63,58 @@ async function markMet(token, profile) {
   }
 }
 
+// ── Cook-session resume ──────────────────────────────────────────────────────
+// While a signed-in user cooks, the proxy keeps the final transcript lines and
+// periodically saves the tail to their cook_sessions row (their own token, RLS).
+// If they reconnect within the window (phone locked, app switched), Micheli is
+// briefed on where they were and continues instead of starting over.
+const RESUME_WINDOW_MS = 3 * 60 * 60 * 1000 // 3 hours
+
+function tokenClient(token) {
+  return createSupabaseClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    auth: { persistSession: false },
+    global: { headers: { Authorization: `Bearer ${token}` } },
+  })
+}
+
+async function loadCookState(token) {
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !token) return null
+  try {
+    const { data, error } = await tokenClient(token)
+      .from('cook_sessions')
+      .select('lines, updated_at')
+      .maybeSingle()
+    if (error || !data || !data.updated_at) return null
+    if (Date.now() - new Date(data.updated_at).getTime() > RESUME_WINDOW_MS) return null
+    if (!Array.isArray(data.lines) || data.lines.length === 0) return null
+    return data
+  } catch (err) {
+    console.error('[cook] load failed:', err.message)
+    return null
+  }
+}
+
+async function saveCookState(token, userId, lines) {
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !token || !userId || lines.length === 0) return
+  try {
+    await tokenClient(token).from('cook_sessions').upsert({
+      user_id: userId,
+      lines,
+      updated_at: new Date().toISOString(),
+    })
+  } catch (err) {
+    console.error('[cook] save failed:', err.message)
+  }
+}
+
+function resumeInstruction(cookState) {
+  if (!cookState) return ''
+  const convo = cookState.lines
+    .map((l) => `${l.who === 'user' ? 'User' : 'You'}: ${l.text}`)
+    .join('\n')
+  return `\n\nEarlier today you were already cooking with this user, then the conversation was interrupted. The last things said were:\n${convo}\n\nInstead of any other opening, begin by warmly picking up where you left off — in one short sentence remind them exactly where you were (the dish and the step), then continue guiding from there. If that earlier conversation clearly shows the dish was finished, ignore it and instead say exactly: "Welcome back! What ingredients are we working with today?" Never reintroduce yourself.`
+}
+
 // ── Recipe generation ────────────────────────────────────────────────────────
 app.post('/api/recipe/generate', async (req, res) => {
   const { ingredients, language } = req.body || {}
@@ -292,8 +344,18 @@ wss.on('connection', (browserWs, req) => {
   let authInFlight = false
   let user = null // null = guest
   let profile = null // dietary profile row, null for guests / no restrictions
-  let authToken = null // kept only to mark has_met_micheli on the user's own row
+  let authToken = null // the user's own token — used for their profile + cook-session rows
+  let cookState = null // interrupted-cook tail from a recent session, if any
   const pending = []
+
+  // Live transcript of this session (final lines only), used for resume-after-lock.
+  const transcript = []
+  let linesSinceFlush = 0
+  const flushCookState = () => {
+    if (!authToken || !user || transcript.length === 0) return
+    linesSinceFlush = 0
+    saveCookState(authToken, user.id, transcript.slice(-14)) // fire and forget
+  }
 
   const startOpenAI = () => {
     if (started) return
@@ -310,7 +372,10 @@ wss.on('connection', (browserWs, req) => {
       session: {
         type: 'realtime',
         output_modalities: ['audio'],
-        instructions: MICHELI_PROMPT + dietaryRules(profile) + greetingInstruction(profile),
+        instructions:
+          MICHELI_PROMPT +
+          dietaryRules(profile) +
+          (cookState ? resumeInstruction(cookState) : greetingInstruction(profile)),
         audio: {
           input: {
             format: { type: 'audio/pcm', rate: 24000 },
@@ -342,6 +407,33 @@ wss.on('connection', (browserWs, req) => {
 
   openaiWs.on('message', (data, isBinary) => {
     if (browserWs.readyState === WebSocket.OPEN) browserWs.send(data, { binary: isBinary })
+    // Capture final transcript lines for resume-after-lock (signed-in users only).
+    // Only frames that can carry a finished transcript are parsed — audio deltas are not.
+    if (user) {
+      const head = data.toString('utf8', 0, 200)
+      if (
+        head.includes('output_audio_transcript.done') ||
+        head.includes('input_audio_transcription.completed')
+      ) {
+        try {
+          const msg = JSON.parse(data.toString('utf8'))
+          let line = null
+          if (msg.type === 'response.output_audio_transcript.done' && msg.transcript) {
+            line = { who: 'chef', text: String(msg.transcript).slice(0, 500) }
+          } else if (
+            msg.type === 'conversation.item.input_audio_transcription.completed' &&
+            msg.transcript
+          ) {
+            line = { who: 'user', text: String(msg.transcript).slice(0, 500) }
+          }
+          if (line && line.text.trim()) {
+            transcript.push(line)
+            if (transcript.length > 40) transcript.splice(0, transcript.length - 40)
+            if (++linesSinceFlush >= 4) flushCookState()
+          }
+        } catch { /* never let transcript capture break the audio stream */ }
+      }
+    }
   })
 
   openaiWs.on('error', (err) => {
@@ -380,9 +472,12 @@ wss.on('connection', (browserWs, req) => {
         user = await verifyUser(parsed.token)
         if (user) {
           authToken = parsed.token
-          profile = await loadProfile(parsed.token)
+          ;[profile, cookState] = await Promise.all([
+            loadProfile(parsed.token),
+            loadCookState(parsed.token),
+          ])
         }
-        console.log(`[WS] auth: ${user ? `user ${user.id}` : 'guest'}${profile ? ' (profile loaded)' : ''}`)
+        console.log(`[WS] auth: ${user ? `user ${user.id}` : 'guest'}${profile ? ' (profile loaded)' : ''}${cookState ? ' (resuming cook)' : ''}`)
         authInFlight = false
         startOpenAI()
         return // the auth frame itself is never forwarded to OpenAI
@@ -401,6 +496,7 @@ wss.on('connection', (browserWs, req) => {
   browserWs.on('close', (code) => {
     console.log(`[WS] Browser disconnected: ${code}`)
     clearTimeout(authTimer)
+    flushCookState() // phone locked / app switched — save where they were
     if (openaiWs && openaiWs.readyState === WebSocket.OPEN) openaiWs.close(1000)
   })
 
