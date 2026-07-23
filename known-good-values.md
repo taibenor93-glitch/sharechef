@@ -28,10 +28,14 @@ moved to the OpenAI Realtime API. Do not reintroduce tts-1 or nova.
 
 ## Environment variables
 
-| Name                | Used by             | Notes                                  |
-|---------------------|---------------------|----------------------------------------|
-| OPENAI_API_KEY      | Express server      | server-side only                       |
-| VITE_OPENAI_API_KEY | Vite client build   | needs the VITE_ prefix to be exposed   |
+| Name                   | Used by             | Notes                                        |
+|------------------------|---------------------|----------------------------------------------|
+| OPENAI_API_KEY         | Express server      | server-side only (rotated 2026-07-23)        |
+| VITE_OPENAI_API_KEY    | Vite client build   | needs the VITE_ prefix to be exposed         |
+| SUPABASE_URL           | Express server      | ratified 2026-07-23 — token verify + profiles |
+| SUPABASE_ANON_KEY      | Express server      | ratified 2026-07-23 — anon/publishable key ONLY; the server must never hold the service-role key |
+| VITE_SUPABASE_URL      | Vite client build   | ratified 2026-07-23 — long in use            |
+| VITE_SUPABASE_ANON_KEY | Vite client build   | ratified 2026-07-23 — long in use            |
 
 Both are set in local `.env` / `server/.env` AND in Railway Variables. A key that
 exists in one place but not the other is a classic ShareChef failure — verify both.

@@ -37,9 +37,31 @@ Language: Speak American English by default. Only reply in another language if t
 
 Stay grounded: You can only know what the user tells you in words. You cannot see, hear the room, or observe the kitchen. Never describe or comment on sounds, sights, or anything happening around them — only respond to what they actually say. If you did not clearly understand them, warmly ask them to say it again rather than guessing.
 
-How you cook with them: Work only with the ingredients the user already has. Never suggest buying anything. Ask one question at a time. Guide one step at a time and wait for them to confirm before moving on. Celebrate small wins naturally — "Perfect, that's exactly right."
+How you cook with them: Work only with the ingredients the user already has. Never suggest buying anything. Ask one question at a time. Guide one step at a time and wait for them to confirm before moving on. Celebrate small wins naturally — "Perfect, that's exactly right."`
 
-Begin every new conversation by warmly greeting the user and asking what ingredients they have right now.`
+// Opening line depends on whether this user has met Micheli before.
+// First-timers (and guests, who can't be recognized) get the full introduction;
+// everyone else gets a welcome back with no reintroduction.
+function greetingInstruction(profile) {
+  if (profile && profile.has_met_micheli) {
+    return '\n\nBegin this conversation by saying exactly: "Welcome back! What ingredients are we working with today?" Never introduce yourself or explain who you are — this user already knows you well.'
+  }
+  return '\n\nBegin this conversation by saying exactly: "Hello, I\'m Micheli, your personal chef. What\'s in your kitchen tonight?"'
+}
+
+// Marks that the user has now met Micheli (their own row, via their own token — RLS applies).
+async function markMet(token, profile) {
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !token || !profile || profile.has_met_micheli) return
+  try {
+    const client = createSupabaseClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: { persistSession: false },
+      global: { headers: { Authorization: `Bearer ${token}` } },
+    })
+    await client.from('profiles').update({ has_met_micheli: true }).eq('id', profile.id)
+  } catch (err) {
+    console.error('[profile] markMet failed:', err.message)
+  }
+}
 
 // ── Recipe generation ────────────────────────────────────────────────────────
 app.post('/api/recipe/generate', async (req, res) => {
@@ -204,7 +226,7 @@ async function loadProfile(token) {
     })
     const { data, error } = await client
       .from('profiles')
-      .select('gluten_free, dairy_free, kosher, celiac, allergies')
+      .select('id, gluten_free, dairy_free, kosher, celiac, allergies, has_met_micheli')
       .maybeSingle()
     if (error || !data) return null
     return data
@@ -270,6 +292,7 @@ wss.on('connection', (browserWs, req) => {
   let authInFlight = false
   let user = null // null = guest
   let profile = null // dietary profile row, null for guests / no restrictions
+  let authToken = null // kept only to mark has_met_micheli on the user's own row
   const pending = []
 
   const startOpenAI = () => {
@@ -287,7 +310,7 @@ wss.on('connection', (browserWs, req) => {
       session: {
         type: 'realtime',
         output_modalities: ['audio'],
-        instructions: MICHELI_PROMPT + dietaryRules(profile),
+        instructions: MICHELI_PROMPT + dietaryRules(profile) + greetingInstruction(profile),
         audio: {
           input: {
             format: { type: 'audio/pcm', rate: 24000 },
@@ -313,6 +336,8 @@ wss.on('connection', (browserWs, req) => {
       if (openaiWs.readyState === WebSocket.OPEN) openaiWs.send(msg)
     }
     pending.length = 0
+    // From the next session on, this user gets "Welcome back" instead of the intro.
+    markMet(authToken, profile)
   })
 
   openaiWs.on('message', (data, isBinary) => {
@@ -353,7 +378,10 @@ wss.on('connection', (browserWs, req) => {
         authInFlight = true
         clearTimeout(authTimer)
         user = await verifyUser(parsed.token)
-        if (user) profile = await loadProfile(parsed.token)
+        if (user) {
+          authToken = parsed.token
+          profile = await loadProfile(parsed.token)
+        }
         console.log(`[WS] auth: ${user ? `user ${user.id}` : 'guest'}${profile ? ' (profile loaded)' : ''}`)
         authInFlight = false
         startOpenAI()
