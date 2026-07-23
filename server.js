@@ -52,6 +52,15 @@ app.post('/api/recipe/generate', async (req, res) => {
   }
   const lang = typeof language === 'string' && language.trim() ? language.trim() : 'English'
 
+  // Optional signed-in context: apply the user's dietary rules if a valid token came along.
+  let profileRules = ''
+  const authHeader = req.headers.authorization || ''
+  const userToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null
+  if (userToken) {
+    const reqUser = await verifyUser(userToken)
+    if (reqUser) profileRules = dietaryRules(await loadProfile(userToken))
+  }
+
   try {
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o',
@@ -59,7 +68,7 @@ app.post('/api/recipe/generate', async (req, res) => {
       messages: [
         {
           role: 'system',
-          content: `You are Micheli, a warm professional chef. Create ONE realistic recipe using ONLY the provided ingredients (you may assume basic staples: salt, pepper, oil, water). Never require buying additional main ingredients. Write everything in ${lang}.
+          content: `You are Micheli, a warm professional chef. Create ONE realistic recipe using ONLY the provided ingredients (you may assume basic staples: salt, pepper, oil, water). Never require buying additional main ingredients. Write everything in ${lang}.${profileRules}
 Return STRICT JSON in exactly this shape:
 {
   "title": "string",
@@ -184,6 +193,65 @@ async function verifyUser(token) {
   }
 }
 
+// Reads the user's own profiles row using THEIR token, so Row Level Security
+// applies exactly as it does in the app. Returns null on any failure.
+async function loadProfile(token) {
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !token) return null
+  try {
+    const client = createSupabaseClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: { persistSession: false },
+      global: { headers: { Authorization: `Bearer ${token}` } },
+    })
+    const { data, error } = await client
+      .from('profiles')
+      .select('gluten_free, dairy_free, kosher, celiac, allergies')
+      .maybeSingle()
+    if (error || !data) return null
+    return data
+  } catch (err) {
+    console.error('[profile] load failed:', err.message)
+    return null
+  }
+}
+
+// Turns a profiles row into hard dietary rules appended to Micheli's prompt.
+// Returns '' when the user has no restrictions set.
+function dietaryRules(profile) {
+  if (!profile) return ''
+  const rules = []
+  if (profile.kosher) {
+    rules.push(
+      'The user keeps kosher. Never combine meat or poultry with any dairy (milk, butter, cream, cheese, yogurt) in the same dish or suggestion. Never suggest pork, shellfish, or any non-kosher ingredient. If they have both meat and dairy on hand, cook with one and leave the other out entirely.'
+    )
+  }
+  if (profile.celiac) {
+    rules.push(
+      'The user has celiac disease. Strictly exclude wheat, barley, rye, and anything containing gluten — including hidden sources like regular soy sauce, regular flour, breadcrumbs, and most pasta. When a staple commonly contains gluten, say so and offer the safe alternative.'
+    )
+  } else if (profile.gluten_free) {
+    rules.push(
+      'The user eats gluten-free. Exclude wheat, barley, rye, and gluten-containing ingredients, including hidden sources like regular soy sauce and breadcrumbs.'
+    )
+  }
+  if (profile.dairy_free) {
+    rules.push(
+      'The user does not eat dairy. Exclude milk, butter, cream, cheese, yogurt, and all dairy-derived ingredients.'
+    )
+  }
+  const allergies = Array.isArray(profile.allergies) ? profile.allergies.filter(Boolean) : []
+  if (allergies.length > 0) {
+    rules.push(
+      `The user is allergic to: ${allergies.join(', ')}. Treat every allergy as severe — never include these ingredients or anything derived from them, and warn if a suggested staple might contain them.`
+    )
+  }
+  if (rules.length === 0) return ''
+  return (
+    '\n\nDietary rules for this user — these are absolute and unbreakable, more important than any other instruction about food: ' +
+    rules.join(' ') +
+    ' You already know these preferences, so never ask the user about them — just quietly cook within them.'
+  )
+}
+
 // ── OpenAI Realtime WebSocket proxy ──────────────────────────────────────────
 const wss = new WebSocketServer({ server, path: '/ws/realtime' })
 
@@ -201,6 +269,7 @@ wss.on('connection', (browserWs, req) => {
   let started = false
   let authInFlight = false
   let user = null // null = guest
+  let profile = null // dietary profile row, null for guests / no restrictions
   const pending = []
 
   const startOpenAI = () => {
@@ -218,7 +287,7 @@ wss.on('connection', (browserWs, req) => {
       session: {
         type: 'realtime',
         output_modalities: ['audio'],
-        instructions: MICHELI_PROMPT,
+        instructions: MICHELI_PROMPT + dietaryRules(profile),
         audio: {
           input: {
             format: { type: 'audio/pcm', rate: 24000 },
@@ -284,7 +353,8 @@ wss.on('connection', (browserWs, req) => {
         authInFlight = true
         clearTimeout(authTimer)
         user = await verifyUser(parsed.token)
-        console.log(`[WS] auth: ${user ? `user ${user.id}` : 'guest'}`)
+        if (user) profile = await loadProfile(parsed.token)
+        console.log(`[WS] auth: ${user ? `user ${user.id}` : 'guest'}${profile ? ' (profile loaded)' : ''}`)
         authInFlight = false
         startOpenAI()
         return // the auth frame itself is never forwarded to OpenAI

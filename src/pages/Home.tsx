@@ -116,7 +116,8 @@ export function HomePage() {
     setRecipe(null)
     setSaveState('idle')
     try {
-      const r = await generateRecipe(ingredients, language)
+      const { data } = await supabase.auth.getSession()
+      const r = await generateRecipe(ingredients, language, data.session?.access_token ?? null)
       setRecipe(r)
     } catch (err) {
       setGenError(err instanceof Error ? err.message : 'Could not create a recipe. Try again.')

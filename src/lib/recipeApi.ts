@@ -13,11 +13,15 @@ export interface GeneratedRecipe {
 
 export async function generateRecipe(
   ingredients: string[],
-  language = 'English'
+  language = 'English',
+  accessToken?: string | null
 ): Promise<GeneratedRecipe> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  // Signed-in users get their dietary rules applied server-side.
+  if (accessToken) headers.Authorization = `Bearer ${accessToken}`
   const res = await fetch(`${API_BASE}/api/recipe/generate`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify({ ingredients, language }),
   })
   if (!res.ok) {

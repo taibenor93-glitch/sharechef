@@ -26,6 +26,7 @@ export function Layout() {
           <nav className="nav">
             <NavLink to="/" end className={linkClass}>Cook</NavLink>
             <NavLink to="/saved" className={linkClass}>My recipes</NavLink>
+            <NavLink to="/preferences" className={linkClass}>Preferences</NavLink>
             <button type="button" className="nav-link nav-signout" onClick={leave}>
               {guest && !session ? 'Sign in' : 'Sign out'}
             </button>
