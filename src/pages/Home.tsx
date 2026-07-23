@@ -89,7 +89,10 @@ export function HomePage() {
     if (status === 'idle') {
       startingRef.current = true
       await v.unlockAudio()
-      v.connect()
+      // Fetch a fresh token at connect time — the one in React state can be
+      // stale if the app sat in the background past the token's expiry.
+      const { data } = await supabase.auth.getSession()
+      v.connect(data.session?.access_token ?? null)
     } else {
       startingRef.current = false
       v.disconnect()

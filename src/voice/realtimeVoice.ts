@@ -39,11 +39,16 @@ export class RealtimeVoice {
     if (this.playbackCtx!.state === 'suspended') await this.playbackCtx!.resume()
   }
 
-  connect(): void {
+  connect(accessToken?: string | null): void {
     if (this.ws && this.ws.readyState <= WebSocket.OPEN) return
     this.ws = new WebSocket(`${WS_BASE}/ws/realtime`)
     this.cb.onStatus('connecting')
-    this.ws.onopen = () => this.cb.onStatus('ready')
+    this.ws.onopen = () => {
+      // Identify the signed-in user to the server before any audio flows.
+      // Guests send token: null and get an anonymous session.
+      this.wsSend({ type: 'auth', token: accessToken ?? null })
+      this.cb.onStatus('ready')
+    }
     this.ws.onmessage = (e) => this.handleEvent(JSON.parse(e.data as string))
     this.ws.onerror = () => this.cb.onError('Connection error — refresh to reconnect.')
     this.ws.onclose = () => {

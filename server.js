@@ -6,6 +6,7 @@ import { WebSocketServer, WebSocket } from 'ws'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 import OpenAI from 'openai'
+import { createClient as createSupabaseClient } from '@supabase/supabase-js'
 
 dotenv.config()
 
@@ -158,6 +159,31 @@ app.post('/api/test/chat', async (req, res) => {
   }
 })
 
+// ── Supabase auth verification (server-side) ─────────────────────────────────
+// Uses the anon key only — it can verify a user's JWT but grants no admin power;
+// all data access stays behind Row Level Security. No service-role key on this server.
+const SUPABASE_URL = process.env.SUPABASE_URL
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY
+const supabaseAuth =
+  SUPABASE_URL && SUPABASE_ANON_KEY
+    ? createSupabaseClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { persistSession: false } })
+    : null
+if (!supabaseAuth) {
+  console.warn('[auth] SUPABASE_URL / SUPABASE_ANON_KEY not set — voice sessions will all run as guest.')
+}
+
+async function verifyUser(token) {
+  if (!supabaseAuth || !token) return null
+  try {
+    const { data, error } = await supabaseAuth.auth.getUser(token)
+    if (error || !data?.user) return null
+    return { id: data.user.id, email: data.user.email ?? null }
+  } catch (err) {
+    console.error('[auth] verify failed:', err.message)
+    return null
+  }
+}
+
 // ── OpenAI Realtime WebSocket proxy ──────────────────────────────────────────
 const wss = new WebSocketServer({ server, path: '/ws/realtime' })
 
@@ -170,15 +196,23 @@ wss.on('connection', (browserWs, req) => {
     return
   }
 
-  const openaiWs = new WebSocket(REALTIME_URL, {
+  let openaiWs = null
+  let sessionReady = false
+  let started = false
+  let authInFlight = false
+  let user = null // null = guest
+  const pending = []
+
+  const startOpenAI = () => {
+    if (started) return
+    started = true
+
+    openaiWs = new WebSocket(REALTIME_URL, {
     headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
   })
 
-  let sessionReady = false
-  const pending = []
-
   openaiWs.on('open', () => {
-    console.log(`[WS] Connected to OpenAI Realtime (${REALTIME_MODEL}, voice=${REALTIME_VOICE})`)
+    console.log(`[WS] Connected to OpenAI Realtime (${REALTIME_MODEL}, voice=${REALTIME_VOICE}, user=${user ? user.id : 'guest'})`)
     openaiWs.send(JSON.stringify({
       type: 'session.update',
       session: {
@@ -227,19 +261,49 @@ wss.on('connection', (browserWs, req) => {
     console.log(`[WS] OpenAI closed: ${code}`)
     if (browserWs.readyState === WebSocket.OPEN) browserWs.close(1000)
   })
+  } // end startOpenAI
 
-  browserWs.on('message', (data) => {
+  // Auth handshake: the FIRST browser frame may be { type: 'auth', token }.
+  // Older app builds never send it — their first frame starts a guest session.
+  // A client that connects but sends nothing still gets a session after 4s.
+  const authTimer = setTimeout(() => {
+    if (!started && !authInFlight) startOpenAI()
+  }, 4000)
+
+  browserWs.on('message', async (data) => {
     // OpenAI's realtime API accepts ONLY text (JSON) frames — never binary.
     // ws delivers frames as Buffers, so coerce to a string and always send as text,
     // including queued frames replayed after the session opens.
     const text = typeof data === 'string' ? data : data.toString('utf8')
-    if (sessionReady && openaiWs.readyState === WebSocket.OPEN) openaiWs.send(text)
+
+    if (!started) {
+      if (authInFlight) { pending.push(text); return } // frames racing the token check
+      let parsed = null
+      try { parsed = JSON.parse(text) } catch { /* not JSON — treat as normal frame */ }
+      if (parsed && parsed.type === 'auth') {
+        authInFlight = true
+        clearTimeout(authTimer)
+        user = await verifyUser(parsed.token)
+        console.log(`[WS] auth: ${user ? `user ${user.id}` : 'guest'}`)
+        authInFlight = false
+        startOpenAI()
+        return // the auth frame itself is never forwarded to OpenAI
+      }
+      // Old client: first frame is a normal realtime event — start as guest.
+      clearTimeout(authTimer)
+      startOpenAI()
+      pending.push(text)
+      return
+    }
+
+    if (sessionReady && openaiWs && openaiWs.readyState === WebSocket.OPEN) openaiWs.send(text)
     else pending.push(text)
   })
 
   browserWs.on('close', (code) => {
     console.log(`[WS] Browser disconnected: ${code}`)
-    if (openaiWs.readyState === WebSocket.OPEN) openaiWs.close(1000)
+    clearTimeout(authTimer)
+    if (openaiWs && openaiWs.readyState === WebSocket.OPEN) openaiWs.close(1000)
   })
 
   browserWs.on('error', (err) => console.error('[WS] Browser error:', err.message))
