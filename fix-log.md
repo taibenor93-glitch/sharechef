@@ -1,0 +1,6 @@
+## 2026-07-26 — "Micheli doesn't work" (French / forgetting / kicked out)
+Symptom: refuses French, comes back in English and restarts, forgets prior cooking, app drops mid-session (both local and Railway).
+Root cause 1 (FIXED in server.js, pending deploy): system prompt hard-anchored Micheli to English and the greeting/resume lines were hardcoded English; nothing carried the session language. Rewrote language rules, made greeting/resume language-aware, memory now records the user's cooking language.
+Root cause 2 (OPEN): every production voice session this week logged "auth: guest" — the iOS app never authenticates, so memory/resume/dietary never apply there. Web login verified working 17:32 EDT ("auth: user ... profile loaded, memory loaded"). Investigate iOS (Capacitor) session persistence next.
+Root cause 3 (OPEN): mid-cook disconnects are client-side (WS close 1005/1006 from the browser/app, OpenAI always closes cleanly afterward). Not an OpenAI or server failure. Investigate iOS WebView socket drops next.
+Also noted: Railway has SUPABASE_SERVICE_ROLE_KEY set — server code never uses it and the registry forbids it on this server; delete it. EMAIL_SECRET / NEXT_PUBLIC_APP_URL look like leftovers from another stack.
