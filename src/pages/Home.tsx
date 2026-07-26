@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useAuth } from '../hooks/useAuth'
+import { useAuth, setGuest } from '../hooks/useAuth'
 import { supabase } from '../lib/supabaseClient'
 import { RealtimeVoice } from '../voice/realtimeVoice'
 import type { VoiceStatus } from '../voice/realtimeVoice'
@@ -89,10 +89,13 @@ export function HomePage() {
     if (status === 'idle') {
       startingRef.current = true
       await v.unlockAudio()
-      // Fetch a fresh token at connect time — the one in React state can be
-      // stale if the app sat in the background past the token's expiry.
-      const { data } = await supabase.auth.getSession()
-      v.connect(data.session?.access_token ?? null)
+      // Hand the voice client a token PROVIDER, not a token — it re-fetches a
+      // fresh one on every connect and every automatic reconnect, so a stale
+      // token can never silently downgrade the session to guest.
+      v.connect(async () => {
+        const { data } = await supabase.auth.getSession()
+        return data.session?.access_token ?? null
+      })
     } else {
       startingRef.current = false
       v.disconnect()
@@ -128,7 +131,7 @@ export function HomePage() {
 
   const onSave = async () => {
     if (!recipe) return
-    if (!userId) { nav('/login'); return } // guests sign in to save
+    if (!userId) { setGuest(false); nav('/login'); return } // guests sign in to save (leave guest mode or /login bounces back)
     setSaveState('saving')
     const { error } = await supabase.from('recipes').insert({
       user_id: userId,
@@ -191,6 +194,26 @@ export function HomePage() {
             </svg>
           </button>
           <div className="orb-label">{STATUS_LABEL[status]}</div>
+          {/* Guest mode used to fail silently — this line makes it impossible to miss. */}
+          <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>
+            {userId ? (
+              'Micheli knows you — this cook will be remembered.'
+            ) : (
+              <>
+                Guest mode — Micheli won't remember this session.{' '}
+                {/* Guest mode counts as "signed in" to the router, so a plain
+                    link to /login bounces straight back. Leave guest mode
+                    first, then go. */}
+                <button
+                  type="button"
+                  className="link-btn"
+                  onClick={() => { setGuest(false); nav('/login') }}
+                >
+                  Sign in
+                </button>
+              </>
+            )}
+          </div>
           {status !== 'idle' && (
             <button type="button" className="link-btn" onClick={toggleVoice}>End session</button>
           )}

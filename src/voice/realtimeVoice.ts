@@ -24,6 +24,13 @@ export class RealtimeVoice {
   private isListening = false
   private pendingTranscript = ''
   private cb: VoiceCallbacks
+  // Reconnect-after-drop: iOS loves to kill background sockets mid-cook.
+  // A fresh token is fetched on every (re)connect, and the server briefs
+  // Micheli on where the cook was, so a drop heals instead of restarting.
+  private getToken: (() => Promise<string | null>) | null = null
+  private deliberateEnd = false
+  private reconnectAttempts = 0
+  private reconnectTimer: number | null = null
 
   constructor(callbacks: VoiceCallbacks) {
     this.cb = callbacks
@@ -39,26 +46,71 @@ export class RealtimeVoice {
     if (this.playbackCtx!.state === 'suspended') await this.playbackCtx!.resume()
   }
 
-  connect(accessToken?: string | null): void {
+  connect(tokenOrProvider?: string | null | (() => Promise<string | null>)): void {
     if (this.ws && this.ws.readyState <= WebSocket.OPEN) return
+    this.getToken =
+      typeof tokenOrProvider === 'function'
+        ? tokenOrProvider
+        : () => Promise.resolve(tokenOrProvider ?? null)
+    this.deliberateEnd = false
+    this.reconnectAttempts = 0
+    this.openSocket()
+  }
+
+  private openSocket(): void {
     this.ws = new WebSocket(`${WS_BASE}/ws/realtime`)
     this.cb.onStatus('connecting')
-    this.ws.onopen = () => {
+    this.ws.onopen = async () => {
       // Identify the signed-in user to the server before any audio flows.
-      // Guests send token: null and get an anonymous session.
-      this.wsSend({ type: 'auth', token: accessToken ?? null })
+      // Guests send token: null and get an anonymous session. The token is
+      // fetched fresh on every (re)connect so it can never be stale.
+      const token = this.getToken ? await this.getToken() : null
+      this.wsSend({ type: 'auth', token })
+      const wasReconnect = this.reconnectAttempts > 0
+      this.reconnectAttempts = 0
       this.cb.onStatus('ready')
+      if (wasReconnect) {
+        // The server sees the recent cook and briefs Micheli to pick it
+        // back up — ask her to speak, and start listening again.
+        this.triggerGreeting()
+        this.startListening()
+      }
     }
-    this.ws.onmessage = (e) => this.handleEvent(JSON.parse(e.data as string))
-    this.ws.onerror = () => this.cb.onError('Connection error — refresh to reconnect.')
+    this.ws.onmessage = (e) => {
+      try {
+        this.handleEvent(JSON.parse(e.data as string))
+      } catch {
+        /* never let one bad frame kill the session */
+      }
+    }
+    this.ws.onerror = () => {
+      /* the close handler that always follows decides whether to reconnect */
+    }
     this.ws.onclose = () => {
       this.stopListening()
       this.isPlayingAudio = false
+      if (!this.deliberateEnd && this.reconnectAttempts < 3) {
+        this.reconnectAttempts++
+        this.cb.onStatus('connecting')
+        this.reconnectTimer = window.setTimeout(
+          () => this.openSocket(),
+          800 * this.reconnectAttempts
+        )
+        return
+      }
+      if (!this.deliberateEnd) {
+        this.cb.onError('The connection dropped. Tap the mic — Micheli will pick up where you were.')
+      }
       this.cb.onStatus('idle')
     }
   }
 
   disconnect(): void {
+    this.deliberateEnd = true
+    if (this.reconnectTimer !== null) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
     this.stopListening()
     this.isPlayingAudio = false
     // Tell the server this is a deliberate goodbye, not an interruption —
