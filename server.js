@@ -462,7 +462,7 @@ wss.on('connection', (browserWs, req) => {
               create_response: true,
               interrupt_response: true,
             },
-            transcription: { model: 'whisper-1' },
+            transcription: { model: 'gpt-4o-transcribe' },
           },
           output: {
             format: { type: 'audio/pcm', rate: 24000 },

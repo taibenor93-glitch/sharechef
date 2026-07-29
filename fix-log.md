@@ -10,3 +10,11 @@ Login persistence: supabaseClient.ts now stores the Supabase session in Capacito
 Voice resilience: realtimeVoice.ts auto-reconnects up to 3 times after an unexpected drop, fetches a fresh auth token on every (re)connect, and asks Micheli to resume the cook. Deliberate "End session" never reconnects.
 Visibility: Home.tsx shows under the mic whether Micheli knows the user or the session is guest mode — silent guest sessions are no longer possible.
 iOS version bumped to 1.4 (build 9). TypeScript + vite build verified clean in a clean environment. GATE: no App Store submission until Tai confirms on a real iPhone: login survives app restart, voice session reconnects after a drop, and the signed-in line shows under the mic.
+
+2026-07-27 — v1.4 (build 9) submitted to App Review at 10:30 ET. Status: Waiting for Review. Contains: reachable+persistent sign-in, voice auto-reconnect+resume, visible account state, language fixes live server-side since 07-26.
+
+## 2026-07-29 — stuck in Italian across sessions / sessions kept resuming
+Symptom: signed-in user (Tai's iPhone, v1.4 test build) greeted in Italian every session; clear attempts to switch language were ignored; ended sessions kept coming back.
+Root cause: three mechanisms stacked — memory records the cooking language and the welcome-back greeting opens in it; the language rules said "stay in the conversation's language / unclear audio never switches" with nothing ranking the user's LIVE language above memory or resume; and the 3-hour resume window kept resurrecting saved cooks (the live App Store build can't send the deliberate "bye", so End session looks like a drop).
+Fix (commit 8a2768b, deployed via Railway ~12:41 ET): user's current language now explicitly outranks memory, resume, and the opening greeting (3 prompt clauses); RESUME_WINDOW_MS 3h → 20min. Verified by Tai on a fresh session: Micheli switched to English on the first full English sentence.
+Recurrence note: second language-behavior failure in 4 days (see 07-26). If language behavior breaks a third time, stop patching prompts and build the structural fix: a scripted multi-language switch test against /api/test/chat run before every deploy.

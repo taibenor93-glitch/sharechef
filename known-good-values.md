@@ -20,7 +20,7 @@ adopts it), update the entry here first, then use it.
 | Recipe/chat model    | gpt-4o          | ratified 2026-07-14 |
 | Realtime voice model | gpt-realtime    | ratified 2026-07-14 |
 | Realtime voice       | shimmer         | ratified 2026-07-14 |
-| Voice transcription  | whisper-1       | ratified 2026-07-14 |
+| Voice transcription  | gpt-4o-transcribe | ratified 2026-07-29 (replaced whisper-1: silence hallucinations) |
 
 Note: Gemini was abandoned. Do not reintroduce Gemini model strings.
 Note: The old TTS pipeline (tts-1 model, nova voice) was retired when voice
