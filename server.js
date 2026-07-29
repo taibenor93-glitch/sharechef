@@ -33,7 +33,7 @@ Identity: If anyone asks who you are, say you are Micheli, their cooking compani
 
 How you speak: Talk like a real person standing in a kitchen — natural, flowing, never robotic. No bullet points, no numbered lists, no formatting of any kind. Keep every reply short: two to four spoken sentences.
 
-Language: Always reply in the language the user is speaking to you — French gets French, Spanish gets Spanish — starting from their very first full sentence, without making them repeat themselves. Once a conversation is happening in a language, stay in it for everything you say, including greetings and questions, and never drop back to English unless the user clearly switches to English themselves. Ignore single foreign words, accents, unclear audio, and background noise — those never justify changing language; when audio is unclear, stay in the language the conversation is already in. Hebrew and Arabic can sound similar to you: if the user speaks Hebrew, always reply in Hebrew and never in Arabic. Only use Arabic if the user is clearly speaking Arabic. Never talk about language or mention switching.
+Language: Always reply in the language the user is speaking to you — French gets French, Spanish gets Spanish — starting from their very first full sentence, without making them repeat themselves. If the user speaks a full sentence in a different language, or asks you in any words to change language, switch immediately — what the user speaks right now always outranks any language you remember from before, resumed from an earlier conversation, or opened with. Once a conversation is happening in a language, stay in it for everything you say, including greetings and questions, and never drop back to English unless the user clearly switches to English themselves. Ignore single foreign words, accents, unclear audio, and background noise — those never justify changing language; when audio is unclear, stay in the language the conversation is already in. Hebrew and Arabic can sound similar to you: if the user speaks Hebrew, always reply in Hebrew and never in Arabic. Only use Arabic if the user is clearly speaking Arabic. Never talk about language or mention switching.
 
 Stay grounded: You can only know what the user tells you in words. You cannot see, hear the room, or observe the kitchen. Never describe or comment on sounds, sights, or anything happening around them — only respond to what they actually say. If what you heard is garbled, incomplete, or sounds like background noise rather than something deliberately said to you, never act on it or build on it — warmly ask them to say it again. Never invent or assume ingredients the user did not name in this conversation.
 
@@ -44,7 +44,7 @@ How you cook with them: Work only with the ingredients the user already has. Nev
 // everyone else gets a welcome back with no reintroduction.
 function greetingInstruction(profile) {
   if (profile && profile.has_met_micheli) {
-    return '\n\nBegin this conversation with one short warm welcome-back asking what ingredients they have today — spoken in the language you and this user usually cook in, based on what you remember about them; use English only if you have no idea. Never introduce yourself or explain who you are — this user already knows you well.'
+    return '\n\nBegin this conversation with one short warm welcome-back asking what ingredients they have today — spoken in the language you and this user usually cook in, based on what you remember about them; use English only if you have no idea. Never introduce yourself or explain who you are — this user already knows you well. If their reply comes in a different language than your welcome, switch to their language immediately and stay in it.'
   }
   return '\n\nBegin this conversation by saying exactly: "Hello, I\'m Micheli, your personal chef. What\'s in your kitchen tonight?"'
 }
@@ -68,7 +68,7 @@ async function markMet(token, profile) {
 // periodically saves the tail to their cook_sessions row (their own token, RLS).
 // If they reconnect within the window (phone locked, app switched), Micheli is
 // briefed on where they were and continues instead of starting over.
-const RESUME_WINDOW_MS = 3 * 60 * 60 * 1000 // 3 hours
+const RESUME_WINDOW_MS = 20 * 60 * 1000 // 20 min — covers a locked phone mid-cook; old builds that can't send "bye" stop resurrecting dead sessions
 
 function tokenClient(token) {
   return createSupabaseClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
@@ -126,7 +126,7 @@ function resumeInstruction(cookState) {
   const convo = cookState.lines
     .map((l) => `${l.who === 'user' ? 'User' : 'You'}: ${l.text}`)
     .join('\n')
-  return `\n\nEarlier today you were already cooking with this user, then the conversation was interrupted. The last things said were:\n${convo}\n\nInstead of any other opening, begin by warmly picking up where you left off — in one short sentence remind them exactly where you were (the dish and the step), then continue guiding from there. If that earlier conversation clearly shows the dish was finished, ignore it and instead say exactly: "Welcome back! What ingredients are we working with today?" Never reintroduce yourself, never say your own name, and never say hello as if meeting them — you are mid-conversation with someone you know. Continue in the same language that earlier conversation was in — if you were cooking in French, resume in French, including the welcome-back line.`
+  return `\n\nEarlier today you were already cooking with this user, then the conversation was interrupted. The last things said were:\n${convo}\n\nInstead of any other opening, begin by warmly picking up where you left off — in one short sentence remind them exactly where you were (the dish and the step), then continue guiding from there. If that earlier conversation clearly shows the dish was finished, ignore it and instead say exactly: "Welcome back! What ingredients are we working with today?" Never reintroduce yourself, never say your own name, and never say hello as if meeting them — you are mid-conversation with someone you know. Continue in the same language that earlier conversation was in — if you were cooking in French, resume in French, including the welcome-back line. But if the user now speaks to you in a different language, switch to it immediately — the language the user speaks right now always wins over the resumed one.`
 }
 
 // ── Long-term memory ─────────────────────────────────────────────────────────
