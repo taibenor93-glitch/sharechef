@@ -4,6 +4,7 @@ import { Layout } from './components/Layout'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import { LoginPage } from './pages/Login'
 import { SignupPage } from './pages/Signup'
+import { ResetPasswordPage } from './pages/ResetPassword'
 import { HomePage } from './pages/Home'
 import { SavedListPage } from './pages/SavedList'
 import { SavedDetailPage } from './pages/SavedDetail'
@@ -28,6 +29,7 @@ export default function App() {
     <Routes>
       <Route path="/login" element={authed ? <Navigate to="/" replace /> : <LoginPage />} />
       <Route path="/signup" element={authed ? <Navigate to="/" replace /> : <SignupPage />} />
+      <Route path="/reset" element={<ResetPasswordPage />} />
       <Route element={<Layout />}>
         <Route path="/about" element={<AboutPage />} />
         <Route path="/faq" element={<FAQPage />} />

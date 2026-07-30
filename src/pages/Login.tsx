@@ -59,6 +59,11 @@ export function LoginPage() {
               required
             />
           </div>
+          <div style={{ textAlign: 'right', marginTop: -4 }}>
+            <Link to="/reset" className="auth-alt" style={{ margin: 0, fontSize: 13 }}>
+              Forgot password?
+            </Link>
+          </div>
           {error && <div className="alert alert-error">{error}</div>}
           <button className="btn btn-primary btn-block" disabled={busy}>
             {busy ? 'Signing in…' : 'Sign in'}
