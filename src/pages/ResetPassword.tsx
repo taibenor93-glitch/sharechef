@@ -18,7 +18,12 @@ export function ResetPasswordPage() {
 
   useEffect(() => {
     // Arriving from the emailed recovery link, supabase-js parses the URL and
-    // fires PASSWORD_RECOVERY — switch this page to "set a new password" mode.
+    // fires PASSWORD_RECOVERY. That can happen before this component mounts, so
+    // also check on mount for a session the recovery link already established —
+    // if one exists, we're here to set a new password.
+    supabase.auth.getSession().then(({ data }) => {
+      if (data.session) setMode('update')
+    })
     const { data: sub } = supabase.auth.onAuthStateChange((event) => {
       if (event === 'PASSWORD_RECOVERY') setMode('update')
     })
