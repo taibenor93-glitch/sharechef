@@ -28,6 +28,7 @@ export class RealtimeVoice {
   // A fresh token is fetched on every (re)connect, and the server briefs
   // Micheli on where the cook was, so a drop heals instead of restarting.
   private getToken: (() => Promise<string | null>) | null = null
+  private getLanguage: (() => string | null) | null = null
   private deliberateEnd = false
   private reconnectAttempts = 0
   private reconnectTimer: number | null = null
@@ -46,12 +47,16 @@ export class RealtimeVoice {
     if (this.playbackCtx!.state === 'suspended') await this.playbackCtx!.resume()
   }
 
-  connect(tokenOrProvider?: string | null | (() => Promise<string | null>)): void {
+  connect(
+    tokenOrProvider?: string | null | (() => Promise<string | null>),
+    languageProvider?: () => string | null
+  ): void {
     if (this.ws && this.ws.readyState <= WebSocket.OPEN) return
     this.getToken =
       typeof tokenOrProvider === 'function'
         ? tokenOrProvider
         : () => Promise.resolve(tokenOrProvider ?? null)
+    this.getLanguage = languageProvider ?? null
     this.deliberateEnd = false
     this.reconnectAttempts = 0
     this.openSocket()
@@ -65,7 +70,8 @@ export class RealtimeVoice {
       // Guests send token: null and get an anonymous session. The token is
       // fetched fresh on every (re)connect so it can never be stale.
       const token = this.getToken ? await this.getToken() : null
-      this.wsSend({ type: 'auth', token })
+      const language = this.getLanguage ? this.getLanguage() : null
+      this.wsSend({ type: 'auth', token, language })
       const wasReconnect = this.reconnectAttempts > 0
       this.reconnectAttempts = 0
       this.cb.onStatus('ready')

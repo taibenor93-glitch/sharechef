@@ -33,20 +33,42 @@ Identity: If anyone asks who you are, say you are Micheli, their cooking compani
 
 How you speak: Talk like a real person standing in a kitchen — natural, flowing, never robotic. No bullet points, no numbered lists, no formatting of any kind. Keep every reply short: two to four spoken sentences.
 
-Language: Always reply in the language the user is speaking to you — French gets French, Spanish gets Spanish — starting from their very first full sentence, without making them repeat themselves. If the user speaks a full sentence in a different language, or asks you in any words to change language, switch immediately — what the user speaks right now always outranks any language you remember from before, resumed from an earlier conversation, or opened with. Once a conversation is happening in a language, stay in it for everything you say, including greetings and questions, and never drop back to English unless the user clearly switches to English themselves. Ignore single foreign words, accents, unclear audio, and background noise — those never justify changing language; when audio is unclear, stay in the language the conversation is already in. Hebrew and Arabic can sound similar to you: if the user speaks Hebrew, always reply in Hebrew and never in Arabic. Only use Arabic if the user is clearly speaking Arabic. Never talk about language or mention switching.
+Language: Speak the session language you are given below. If the user speaks a full clear sentence in a different language, or asks you in any words to change language, switch immediately and follow the user — the language the user is actually speaking right now is always the highest authority, above the session language, above anything you remember, and above any earlier conversation. Ignore single foreign words, accents, unclear audio, and background noise — a language change needs a full clear sentence or an explicit request. Hebrew and Arabic can sound similar to you: if the user speaks Hebrew, always reply in Hebrew and never in Arabic. Only use Arabic if the user is clearly speaking Arabic. Never talk about language or mention switching.
 
 Stay grounded: You can only know what the user tells you in words. You cannot see, hear the room, or observe the kitchen. Never describe or comment on sounds, sights, or anything happening around them — only respond to what they actually say. If what you heard is garbled, incomplete, or sounds like background noise rather than something deliberately said to you, never act on it or build on it — warmly ask them to say it again. Never invent or assume ingredients the user did not name in this conversation.
 
 How you cook with them: Work only with the ingredients the user already has. Never suggest buying anything. Ask one question at a time. Guide one step at a time and wait for them to confirm before moving on. Celebrate small wins naturally — "Perfect, that's exactly right."`
 
+// ── Session language ────────────────────────────────────────────────────────
+// Deterministic order: the user's explicit pick (sent by the app) wins; else a
+// pick saved on their profile; else the device language from Accept-Language;
+// else English. Memory and resumed conversations never decide language.
+const LANGUAGE_BY_CODE = {
+  en: 'English', es: 'Spanish', fr: 'French', it: 'Italian', de: 'German',
+  pt: 'Portuguese', he: 'Hebrew', iw: 'Hebrew', hi: 'Hindi', zh: 'Mandarin',
+  ar: 'Arabic', ja: 'Japanese',
+}
+const KNOWN_LANGUAGES = new Set(Object.values(LANGUAGE_BY_CODE))
+
+function languageFromHeader(req) {
+  const header = req.headers['accept-language']
+  if (!header) return null
+  const code = String(header).split(',')[0].trim().toLowerCase().split('-')[0]
+  return LANGUAGE_BY_CODE[code] || null
+}
+
+function languageInstruction(lang) {
+  return `\n\nSession language: ${lang}. This comes from the user's own settings. Open the conversation in ${lang} and speak ${lang}, including every greeting and welcome-back. This setting outranks any language you remember about this user and any language an earlier or resumed conversation was in. Only the user's live speech outranks it, as described above.`
+}
+
 // Opening line depends on whether this user has met Micheli before.
 // First-timers (and guests, who can't be recognized) get the full introduction;
 // everyone else gets a welcome back with no reintroduction.
-function greetingInstruction(profile) {
+function greetingInstruction(profile, lang) {
   if (profile && profile.has_met_micheli) {
-    return '\n\nBegin this conversation with one short warm welcome-back asking what ingredients they have today — spoken in the language you and this user usually cook in, based on what you remember about them; use English only if you have no idea. Never introduce yourself or explain who you are — this user already knows you well. If their reply comes in a different language than your welcome, switch to their language immediately and stay in it.'
+    return `\n\nBegin this conversation with one short warm welcome-back in ${lang}, asking what ingredients they have today. Never introduce yourself or explain who you are — this user already knows you well.`
   }
-  return '\n\nBegin this conversation by saying exactly: "Hello, I\'m Micheli, your personal chef. What\'s in your kitchen tonight?"'
+  return `\n\nBegin this conversation by introducing yourself in ${lang} with exactly this meaning, spoken naturally in ${lang} (use these exact words when the language is English): "Hello, I'm Micheli, your personal chef. What's in your kitchen tonight?"`
 }
 
 // Marks that the user has now met Micheli (their own row, via their own token — RLS applies).
@@ -126,7 +148,7 @@ function resumeInstruction(cookState) {
   const convo = cookState.lines
     .map((l) => `${l.who === 'user' ? 'User' : 'You'}: ${l.text}`)
     .join('\n')
-  return `\n\nEarlier today you were already cooking with this user, then the conversation was interrupted. The last things said were:\n${convo}\n\nInstead of any other opening, begin by warmly picking up where you left off — in one short sentence remind them exactly where you were (the dish and the step), then continue guiding from there. If that earlier conversation clearly shows the dish was finished, ignore it and instead say exactly: "Welcome back! What ingredients are we working with today?" Never reintroduce yourself, never say your own name, and never say hello as if meeting them — you are mid-conversation with someone you know. Continue in the same language that earlier conversation was in — if you were cooking in French, resume in French, including the welcome-back line. But if the user now speaks to you in a different language, switch to it immediately — the language the user speaks right now always wins over the resumed one.`
+  return `\n\nEarlier today you were already cooking with this user, then the conversation was interrupted. The last things said were:\n${convo}\n\nInstead of any other opening, begin by warmly picking up where you left off — in one short sentence remind them exactly where you were (the dish and the step), then continue guiding from there. If that earlier conversation clearly shows the dish was finished, ignore it and instead say, in the session language, a line with exactly this meaning: "Welcome back! What ingredients are we working with today?" Never reintroduce yourself, never say your own name, and never say hello as if meeting them — you are mid-conversation with someone you know. Speak in the session language given above, even if that earlier conversation happened in a different language — and if the user now speaks a different language in full clear sentences, follow the user. Say the welcome-back line in the session language too.`
 }
 
 // ── Long-term memory ─────────────────────────────────────────────────────────
@@ -150,7 +172,7 @@ async function loadMemory(token) {
 
 function memoryInstruction(summary) {
   if (!summary) return ''
-  return `\n\nWhat you remember about this user from cooking together before: ${summary} Use it the way a good friend would — naturally, and only when relevant. Never recite it, and never mention "memory," "notes," or stored information. What you remember is strictly the past — never treat a remembered dish, ingredient, or plan as tonight's cooking. Today's ingredients are only the ones the user names in this conversation; if they have not named any yet, ask what they have. If anything in it conflicts with the dietary rules above, the dietary rules always win. Never address the user by any name unless they clearly introduced themselves by that name — a wrong name is far worse than no name, so when in doubt use no name at all.`
+  return `\n\nWhat you remember about this user from cooking together before: ${summary} Use it the way a good friend would — naturally, and only when relevant. Never recite it, and never mention "memory," "notes," or stored information. What you remember is strictly the past — never treat a remembered dish, ingredient, or plan as tonight's cooking. Today's ingredients are only the ones the user names in this conversation; if they have not named any yet, ask what they have. If anything in it conflicts with the dietary rules above, the dietary rules always win. Never address the user by any name unless they clearly introduced themselves by that name — a wrong name is far worse than no name, so when in doubt use no name at all. If this memory mentions a language the user speaks or cooks in, ignore it completely — memory never decides language.`
 }
 
 async function summarizeAndSaveMemory(token, userId, oldSummary, lines) {
@@ -166,7 +188,7 @@ async function summarizeAndSaveMemory(token, userId, oldSummary, lines) {
         {
           role: 'system',
           content:
-            "You maintain the private memory of Micheli, a personal chef AI, about one specific user. Merge the existing memory with today's cooking conversation into ONE updated memory. Under 120 words, plain prose, third person. Refer to them ONLY as \"the user\" — NEVER invent, guess, or infer a name. Record a name ONLY if the user clearly and explicitly introduced themselves (\"my name is...\" / \"I'm <name>\"); the conversation comes from speech recognition and often garbles words, so when in any doubt, record no name — and if the existing memory contains a name today's conversation doesn't support, drop it. Keep durable facts: who they cook for, tastes and dislikes, skill level, kitchen equipment, dishes cooked together and how they turned out, and open threads (things they want to try). Drop small talk, step-by-step details, and anything one-off. Always note which language the user cooks in (for example: the user cooks in French). If the existing memory says something today's conversation contradicts, prefer today's.",
+            "You maintain the private memory of Micheli, a personal chef AI, about one specific user. Merge the existing memory with today's cooking conversation into ONE updated memory. Under 120 words, plain prose, third person. Refer to them ONLY as \"the user\" — NEVER invent, guess, or infer a name. Record a name ONLY if the user clearly and explicitly introduced themselves (\"my name is...\" / \"I'm <name>\"); the conversation comes from speech recognition and often garbles words, so when in any doubt, record no name — and if the existing memory contains a name today's conversation doesn't support, drop it. Keep durable facts: who they cook for, tastes and dislikes, skill level, kitchen equipment, dishes cooked together and how they turned out, and open threads (things they want to try). Drop small talk, step-by-step details, and anything one-off. Never record which language the user speaks or cooks in — language is a live setting, not a memory; if the existing memory mentions a language, drop that mention. If the existing memory says something today's conversation contradicts, prefer today's.",
         },
         {
           role: 'user',
@@ -350,7 +372,7 @@ async function loadProfile(token) {
     })
     const { data, error } = await client
       .from('profiles')
-      .select('id, gluten_free, dairy_free, kosher, celiac, allergies, has_met_micheli')
+      .select('id, gluten_free, dairy_free, kosher, celiac, allergies, has_met_micheli, language')
       .maybeSingle()
     if (error || !data) return null
     return data
@@ -420,6 +442,8 @@ wss.on('connection', (browserWs, req) => {
   let cookState = null // interrupted-cook tail from a recent session, if any
   let memory = null // long-term summary of past sessions, if any
   let deliberateEnd = false // user tapped "End session" — close the cook, don't resume it
+  let clientLanguage = null // explicit language pick sent by the app, if any
+  const headerLanguage = languageFromHeader(req)
   const pending = []
 
   // Live transcript of this session (final lines only), used for resume-after-lock.
@@ -441,6 +465,11 @@ wss.on('connection', (browserWs, req) => {
 
   openaiWs.on('open', () => {
     console.log(`[WS] Connected to OpenAI Realtime (${REALTIME_MODEL}, voice=${REALTIME_VOICE}, user=${user ? user.id : 'guest'})`)
+    const profileLanguage =
+      profile && typeof profile.language === 'string' && KNOWN_LANGUAGES.has(profile.language)
+        ? profile.language : null
+    const sessionLanguage = clientLanguage || profileLanguage || headerLanguage || 'English'
+    console.log(`[WS] session language: ${sessionLanguage} (pick=${clientLanguage || '—'}, profile=${profileLanguage || '—'}, device=${headerLanguage || '—'})`)
     openaiWs.send(JSON.stringify({
       type: 'session.update',
       session: {
@@ -448,9 +477,10 @@ wss.on('connection', (browserWs, req) => {
         output_modalities: ['audio'],
         instructions:
           MICHELI_PROMPT +
+          languageInstruction(sessionLanguage) +
           dietaryRules(profile) +
           memoryInstruction(memory) +
-          (cookState ? resumeInstruction(cookState) : greetingInstruction(profile)),
+          (cookState ? resumeInstruction(cookState) : greetingInstruction(profile, sessionLanguage)),
         audio: {
           input: {
             format: { type: 'audio/pcm', rate: 24000 },
@@ -549,6 +579,9 @@ wss.on('connection', (browserWs, req) => {
       let parsed = null
       try { parsed = JSON.parse(text) } catch { /* not JSON — treat as normal frame */ }
       if (parsed && parsed.type === 'auth') {
+        if (typeof parsed.language === 'string' && KNOWN_LANGUAGES.has(parsed.language.trim())) {
+          clientLanguage = parsed.language.trim()
+        }
         authInFlight = true
         clearTimeout(authTimer)
         user = await verifyUser(parsed.token)

@@ -61,6 +61,7 @@ ul, ol { margin: 0; padding-left: 1.15rem; }
   backdrop-filter: blur(14px);
   background: linear-gradient(180deg, rgba(32, 17, 34, 0.85), rgba(32, 17, 34, 0.55));
   border-bottom: 1px solid var(--border);
+  padding-top: env(safe-area-inset-top);
 }
 .topbar-inner {
   max-width: 1080px; margin: 0 auto; padding: 14px 20px;

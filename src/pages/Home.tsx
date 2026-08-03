@@ -8,13 +8,9 @@ import type { VoiceStatus } from '../voice/realtimeVoice'
 import { generateRecipe } from '../lib/recipeApi'
 import type { GeneratedRecipe } from '../lib/recipeApi'
 import { getStarProgress } from '../lib/stars'
+import { LANGUAGES, initialLanguage, saveLanguage, savedLanguage } from '../lib/language'
 
 type Line = { role: 'user' | 'chef'; text: string }
-
-const LANGUAGES = [
-  'English', 'Spanish', 'French', 'Italian', 'German',
-  'Portuguese', 'Hindi', 'Mandarin', 'Arabic', 'Japanese',
-]
 
 const STATUS_LABEL: Record<VoiceStatus, string> = {
   idle: 'Tap to talk to Micheli',
@@ -38,7 +34,7 @@ export function HomePage() {
   const convoRef = useRef<HTMLDivElement | null>(null)
 
   // ── recipe ──
-  const [language, setLanguage] = useState('English')
+  const [language, setLanguage] = useState(initialLanguage)
   const [draft, setDraft] = useState('')
   const [ingredients, setIngredients] = useState<string[]>([])
   const [recipe, setRecipe] = useState<GeneratedRecipe | null>(null)
@@ -82,6 +78,25 @@ export function HomePage() {
   }
   useEffect(() => { loadCount() /* eslint-disable-line */ }, [userId])
 
+  // A signed-in user's saved language pick follows their account across devices.
+  useEffect(() => {
+    if (!userId) return
+    supabase.from('profiles').select('language').eq('id', userId).maybeSingle()
+      .then(({ data }) => {
+        if (data?.language && LANGUAGES.includes(data.language)) {
+          setLanguage(data.language)
+          saveLanguage(data.language)
+        }
+      })
+  }, [userId])
+
+  // An explicit pick wins forever: saved on this device, and on the account too.
+  const changeLanguage = (value: string) => {
+    setLanguage(value)
+    saveLanguage(value)
+    if (userId) supabase.from('profiles').update({ language: value }).eq('id', userId).then(() => {})
+  }
+
   const toggleVoice = async () => {
     const v = voiceRef.current
     if (!v) return
@@ -95,7 +110,7 @@ export function HomePage() {
       v.connect(async () => {
         const { data } = await supabase.auth.getSession()
         return data.session?.access_token ?? null
-      })
+      }, () => savedLanguage())
     } else {
       startingRef.current = false
       v.disconnect()
@@ -242,8 +257,8 @@ export function HomePage() {
             <div className="muted" style={{ fontSize: 14 }}>Add what you have. Micheli won't ask you to buy anything.</div>
           </div>
           <div className="field" style={{ minWidth: 160 }}>
-            <label className="label">Language</label>
-            <select value={language} onChange={(e) => setLanguage(e.target.value)}>
+            <label className="label">Micheli's language</label>
+            <select value={language} onChange={(e) => changeLanguage(e.target.value)}>
               {LANGUAGES.map((l) => <option key={l} value={l}>{l}</option>)}
             </select>
           </div>
