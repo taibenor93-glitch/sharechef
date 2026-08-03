@@ -14,7 +14,7 @@ import { FAQPage } from './pages/FAQ'
 import { PricingPage } from './pages/Pricing'
 
 export default function App() {
-  const { authed, loading } = useAuth()
+  const { authed, session, loading } = useAuth()
 
   if (loading) {
     return (
@@ -27,8 +27,12 @@ export default function App() {
 
   return (
     <Routes>
-      <Route path="/login" element={authed ? <Navigate to="/" replace /> : <LoginPage />} />
-      <Route path="/signup" element={authed ? <Navigate to="/" replace /> : <SignupPage />} />
+      {/* Guest mode used to trap people: it counted as "authed", so /login and
+          /signup bounced straight back home and the only way in was a nav button
+          that sits under the phone status bar. Only a REAL session redirects now —
+          a guest can always reach the sign-in page by URL or by any link. */}
+      <Route path="/login" element={session ? <Navigate to="/" replace /> : <LoginPage />} />
+      <Route path="/signup" element={session ? <Navigate to="/" replace /> : <SignupPage />} />
       <Route path="/reset" element={<ResetPasswordPage />} />
       <Route element={<Layout />}>
         <Route path="/about" element={<AboutPage />} />

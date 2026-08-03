@@ -50,6 +50,14 @@ const LANGUAGE_BY_CODE = {
 }
 const KNOWN_LANGUAGES = new Set(Object.values(LANGUAGE_BY_CODE))
 
+// Reverse map, for telling the transcriber which language to expect. Without it
+// English speech was being written out in Hebrew letters on screen.
+const CODE_BY_LANGUAGE = {
+  English: 'en', Spanish: 'es', French: 'fr', Italian: 'it', German: 'de',
+  Portuguese: 'pt', Hebrew: 'he', Hindi: 'hi', Mandarin: 'zh',
+  Arabic: 'ar', Japanese: 'ja',
+}
+
 function languageFromHeader(req) {
   const header = req.headers['accept-language']
   if (!header) return null
@@ -470,6 +478,18 @@ wss.on('connection', (browserWs, req) => {
         ? profile.language : null
     const sessionLanguage = clientLanguage || profileLanguage || headerLanguage || 'English'
     console.log(`[WS] session language: ${sessionLanguage} (pick=${clientLanguage || '—'}, profile=${profileLanguage || '—'}, device=${headerLanguage || '—'})`)
+    // Tell the browser what the SERVER actually decided. The app used to display
+    // "Micheli knows you" from its own stored login, so a token the server had
+    // rejected still looked signed-in while every session silently ran as a
+    // guest — memory and dietary rules quietly absent. Now the screen shows the
+    // server's answer, not the app's assumption.
+    if (browserWs.readyState === WebSocket.OPEN) {
+      browserWs.send(JSON.stringify({
+        type: 'sc.session',
+        auth: user ? 'user' : 'guest',
+        language: sessionLanguage,
+      }))
+    }
     openaiWs.send(JSON.stringify({
       type: 'session.update',
       session: {
@@ -492,7 +512,12 @@ wss.on('connection', (browserWs, req) => {
               create_response: true,
               interrupt_response: true,
             },
-            transcription: { model: 'gpt-4o-transcribe' },
+            transcription: {
+              model: 'gpt-4o-transcribe',
+              // Tell it which language to expect, so on-screen text matches what
+              // was actually said instead of being spelled in another alphabet.
+              ...(CODE_BY_LANGUAGE[sessionLanguage] ? { language: CODE_BY_LANGUAGE[sessionLanguage] } : {}),
+            },
           },
           output: {
             format: { type: 'audio/pcm', rate: 24000 },

@@ -31,6 +31,8 @@ export function HomePage() {
   const [status, setStatus] = useState<VoiceStatus>('idle')
   const [lines, setLines] = useState<Line[]>([])
   const [voiceError, setVoiceError] = useState<string | null>(null)
+  // What the server says about this session. Null until a session starts.
+  const [serverAuth, setServerAuth] = useState<'user' | 'guest' | null>(null)
   const convoRef = useRef<HTMLDivElement | null>(null)
 
   // ── recipe ──
@@ -51,6 +53,7 @@ export function HomePage() {
       onStatus: (s) => setStatus(s),
       onTranscript: (text, role) => setLines((prev) => [...prev, { role, text }]),
       onError: (m) => setVoiceError(m),
+      onSession: (info) => setServerAuth(info.auth),
     })
     voiceRef.current = v
     return () => v.disconnect()
@@ -211,7 +214,18 @@ export function HomePage() {
           <div className="orb-label">{STATUS_LABEL[status]}</div>
           {/* Guest mode used to fail silently — this line makes it impossible to miss. */}
           <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>
-            {userId ? (
+            {userId && serverAuth === 'guest' ? (
+              <>
+                Your sign-in has expired — Micheli won't remember this session.{' '}
+                <button
+                  type="button"
+                  className="link-btn"
+                  onClick={async () => { await supabase.auth.signOut(); setGuest(false); nav('/login') }}
+                >
+                  Sign in again
+                </button>
+              </>
+            ) : userId ? (
               'Micheli knows you — this cook will be remembered.'
             ) : (
               <>

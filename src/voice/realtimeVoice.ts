@@ -10,6 +10,8 @@ export interface VoiceCallbacks {
   onStatus: (status: VoiceStatus) => void
   onTranscript: (text: string, role: 'user' | 'chef') => void
   onError: (message: string) => void
+  /** What the SERVER decided about this session — the truth, not what the app assumed. */
+  onSession?: (info: { auth: 'user' | 'guest'; language: string }) => void
 }
 
 export class RealtimeVoice {
@@ -205,6 +207,10 @@ export class RealtimeVoice {
 
   private handleEvent(msg: Record<string, any>): void {
     switch (msg.type) {
+      // Server's verdict on who this session belongs to.
+      case 'sc.session':
+        this.cb.onSession?.({ auth: msg.auth === 'user' ? 'user' : 'guest', language: String(msg.language ?? '') })
+        break
       // Assistant audio (gpt-realtime GA event name)
       case 'response.output_audio.delta':
         this.queueAudio(msg.delta as string)
