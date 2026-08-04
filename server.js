@@ -478,18 +478,11 @@ wss.on('connection', (browserWs, req) => {
         ? profile.language : null
     const sessionLanguage = clientLanguage || profileLanguage || headerLanguage || 'English'
     console.log(`[WS] session language: ${sessionLanguage} (pick=${clientLanguage || '—'}, profile=${profileLanguage || '—'}, device=${headerLanguage || '—'})`)
-    // Tell the browser what the SERVER actually decided. The app used to display
-    // "Micheli knows you" from its own stored login, so a token the server had
-    // rejected still looked signed-in while every session silently ran as a
-    // guest — memory and dietary rules quietly absent. Now the screen shows the
-    // server's answer, not the app's assumption.
-    if (browserWs.readyState === WebSocket.OPEN) {
-      browserWs.send(JSON.stringify({
-        type: 'sc.session',
-        auth: user ? 'user' : 'guest',
-        language: sessionLanguage,
-      }))
-    }
+    // NOTE (2026-08-04): the server used to push an `sc.session` status frame to
+    // the browser here, and a `language` hint into the transcriber below. Both
+    // are held back while we test whether they caused the audio breakup Tai
+    // reported on the App Store build (1.4, frozen 2026-07-27), which has never
+    // seen either. Everything else about the language fix stays in place.
     openaiWs.send(JSON.stringify({
       type: 'session.update',
       session: {
@@ -512,12 +505,7 @@ wss.on('connection', (browserWs, req) => {
               create_response: true,
               interrupt_response: true,
             },
-            transcription: {
-              model: 'gpt-4o-transcribe',
-              // Tell it which language to expect, so on-screen text matches what
-              // was actually said instead of being spelled in another alphabet.
-              ...(CODE_BY_LANGUAGE[sessionLanguage] ? { language: CODE_BY_LANGUAGE[sessionLanguage] } : {}),
-            },
+            transcription: { model: 'gpt-4o-transcribe' },
           },
           output: {
             format: { type: 'audio/pcm', rate: 24000 },
