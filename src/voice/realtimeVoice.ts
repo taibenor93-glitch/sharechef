@@ -78,9 +78,9 @@ export class RealtimeVoice {
       this.reconnectAttempts = 0
       this.cb.onStatus('ready')
       if (wasReconnect) {
-        // The server sees the recent cook and briefs Micheli to pick it
-        // back up — ask her to speak, and start listening again.
-        this.triggerGreeting()
+        // Language was re-sent in the auth frame above; the server reloads the
+        // cook state. Force the resume framing so she continues, never re-greets.
+        this.triggerResume()
         this.startListening()
       }
     }
@@ -142,6 +142,27 @@ export class RealtimeVoice {
   triggerGreeting(): void {
     this.wsSend({ type: 'input_audio_buffer.clear' })
     this.wsSend({ type: 'response.create' })
+  }
+
+  /**
+   * Reconnect after an unexpected drop. Language is already re-sent in the auth
+   * frame; the server reloads cook state and briefs Micheli via its resume path.
+   * This overrides instructions for the single reconnect response so she resumes
+   * the current step and never re-introduces herself — even if the server's
+   * cook-state write lost the race with the reconnect.
+   */
+  triggerResume(): void {
+    this.wsSend({ type: 'input_audio_buffer.clear' })
+    this.wsSend({
+      type: 'response.create',
+      response: {
+        instructions:
+          'This is an automatic reconnect after the connection dropped mid-cook. ' +
+          'Do not greet, do not introduce yourself, do not say your name, do not say hello. ' +
+          'In one short sentence, remind them which dish and step you were on, then ' +
+          'continue guiding from exactly there, in the current session language.',
+      },
+    })
   }
 
   async startListening(): Promise<void> {

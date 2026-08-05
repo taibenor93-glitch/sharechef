@@ -466,6 +466,7 @@ wss.on('connection', (browserWs, req) => {
   const startOpenAI = () => {
     if (started) return
     started = true
+    let openaiHeartbeat = null
 
     openaiWs = new WebSocket(REALTIME_URL, {
     headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
@@ -521,6 +522,14 @@ wss.on('connection', (browserWs, req) => {
     pending.length = 0
     // From the next session on, this user gets "Welcome back" instead of the intro.
     markMet(authToken, profile)
+
+    // ── OpenAI-leg keep-alive (ping only, never terminate) ───────────────────
+    // Generate periodic traffic so idle proxies don't drop the upstream socket.
+    // No missed-pong kill on this side by design — only OpenAI or the browser
+    // close ends this leg.
+    openaiHeartbeat = setInterval(() => {
+      if (openaiWs && openaiWs.readyState === WebSocket.OPEN) openaiWs.ping()
+    }, 25000)
   })
 
   openaiWs.on('message', (data, isBinary) => {
@@ -563,6 +572,7 @@ wss.on('connection', (browserWs, req) => {
 
   openaiWs.on('close', (code) => {
     console.log(`[WS] OpenAI closed: ${code}`)
+    if (openaiHeartbeat) { clearInterval(openaiHeartbeat); openaiHeartbeat = null }
     if (browserWs.readyState === WebSocket.OPEN) browserWs.close(1000)
   })
   } // end startOpenAI
@@ -622,9 +632,27 @@ wss.on('connection', (browserWs, req) => {
     else pending.push(text)
   })
 
+  // ── Browser-leg heartbeat ──────────────────────────────────────────────────
+  // Railway idle-closes a quiet WebSocket (~60s → 1005). Ping every 25s; if two
+  // pings go unanswered the leg is dead — terminate so the close handler below
+  // (flush cook state, close the OpenAI leg) runs cleanly.
+  let browserMissedPongs = 0
+  browserWs.on('pong', () => { browserMissedPongs = 0 })
+  const browserHeartbeat = setInterval(() => {
+    if (browserWs.readyState !== WebSocket.OPEN) return
+    if (browserMissedPongs >= 2) {
+      console.log('[WS] Browser leg unresponsive (2 missed pongs) — terminating')
+      browserWs.terminate()
+      return
+    }
+    browserMissedPongs++
+    browserWs.ping()
+  }, 25000)
+
   browserWs.on('close', (code) => {
     console.log(`[WS] Browser disconnected: ${code}`)
     clearTimeout(authTimer)
+    clearInterval(browserHeartbeat)
     if (deliberateEnd) {
       if (user && authToken) clearCookState(authToken, user.id) // ended on purpose — nothing to resume
     } else {
