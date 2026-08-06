@@ -31,7 +31,7 @@ export class RealtimeVoice {
   // Micheli on where the cook was, so a drop heals instead of restarting.
   private getToken: (() => Promise<string | null>) | null = null
   private getLanguage: (() => string | null) | null = null
-  private deliberateEnd = false
+  private intentionalEnd = false
   private reconnectAttempts = 0
   private reconnectTimer: number | null = null
 
@@ -59,7 +59,7 @@ export class RealtimeVoice {
         ? tokenOrProvider
         : () => Promise.resolve(tokenOrProvider ?? null)
     this.getLanguage = languageProvider ?? null
-    this.deliberateEnd = false
+    this.intentionalEnd = false
     this.reconnectAttempts = 0
     this.openSocket()
   }
@@ -97,7 +97,7 @@ export class RealtimeVoice {
     this.ws.onclose = () => {
       this.stopListening()
       this.isPlayingAudio = false
-      if (!this.deliberateEnd && this.reconnectAttempts < 3) {
+      if (!this.intentionalEnd && this.reconnectAttempts < 3) {
         this.reconnectAttempts++
         this.cb.onStatus('connecting')
         this.reconnectTimer = window.setTimeout(
@@ -106,7 +106,7 @@ export class RealtimeVoice {
         )
         return
       }
-      if (!this.deliberateEnd) {
+      if (!this.intentionalEnd) {
         this.cb.onError('The connection dropped. Tap the mic — Micheli will pick up where you were.')
       }
       this.cb.onStatus('idle')
@@ -114,7 +114,7 @@ export class RealtimeVoice {
   }
 
   disconnect(): void {
-    this.deliberateEnd = true
+    this.intentionalEnd = true
     if (this.reconnectTimer !== null) {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null
@@ -123,10 +123,10 @@ export class RealtimeVoice {
     this.isPlayingAudio = false
     // Tell the server this is a deliberate goodbye, not an interruption —
     // a deliberate end closes the cook instead of resuming it next time.
-    this.wsSend({ type: 'bye' })
+    this.wsSend({ type: 'end_session' })
     if (this.ws) {
       this.ws.onclose = null
-      this.ws.close()
+      this.ws.close(1000)
       this.ws = null
     }
     if (this.micStream) {

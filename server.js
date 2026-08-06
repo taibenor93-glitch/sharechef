@@ -98,7 +98,7 @@ async function markMet(token, profile) {
 // periodically saves the tail to their cook_sessions row (their own token, RLS).
 // If they reconnect within the window (phone locked, app switched), Micheli is
 // briefed on where they were and continues instead of starting over.
-const RESUME_WINDOW_MS = 20 * 60 * 1000 // 20 min — covers a locked phone mid-cook; old builds that can't send "bye" stop resurrecting dead sessions
+const RESUME_WINDOW_MS = 20 * 60 * 1000 // 20 min — covers a locked phone mid-cook; old builds that can't send "end_session" stop resurrecting dead sessions
 
 function tokenClient(token) {
   return createSupabaseClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
@@ -449,7 +449,7 @@ wss.on('connection', (browserWs, req) => {
   let authToken = null // the user's own token — used for their profile + cook-session rows
   let cookState = null // interrupted-cook tail from a recent session, if any
   let memory = null // long-term summary of past sessions, if any
-  let deliberateEnd = false // user tapped "End session" — close the cook, don't resume it
+  let intentionalEnd = false // user tapped "End session" — close the cook, don't resume it
   let clientLanguage = null // explicit language pick sent by the app, if any
   const headerLanguage = languageFromHeader(req)
   const pending = []
@@ -590,10 +590,17 @@ wss.on('connection', (browserWs, req) => {
     // including queued frames replayed after the session opens.
     const text = typeof data === 'string' ? data : data.toString('utf8')
 
-    // A tiny "bye" frame marks a deliberate End-session tap; never forward it.
-    if (text.length < 60 && text.includes('"bye"')) {
+    // A tiny "end_session" frame marks a deliberate End-session tap; never forward it.
+    // Clear the cook state right here, on receipt — waiting for the close event to
+    // check a flag races the frame against the socket teardown on flaky mobile
+    // connections, and a lost race left stale state for the next session to resume.
+    if (text.length < 60 && text.includes('"end_session"')) {
       try {
-        if (JSON.parse(text).type === 'bye') { deliberateEnd = true; return }
+        if (JSON.parse(text).type === 'end_session') {
+          intentionalEnd = true
+          if (user && authToken) clearCookState(authToken, user.id)
+          return
+        }
       } catch { /* fall through — treat as a normal frame */ }
     }
 
@@ -653,11 +660,9 @@ wss.on('connection', (browserWs, req) => {
     console.log(`[WS] Browser disconnected: ${code}`)
     clearTimeout(authTimer)
     clearInterval(browserHeartbeat)
-    if (deliberateEnd) {
-      if (user && authToken) clearCookState(authToken, user.id) // ended on purpose — nothing to resume
-    } else {
+    if (!intentionalEnd) {
       flushCookState() // phone locked / app switched — save where they were
-    }
+    } // else: cook state was already cleared when the end_session frame arrived
     // Either way, distill this session into long-term memory (fire and forget).
     if (user && authToken) summarizeAndSaveMemory(authToken, user.id, memory, transcript.slice())
     if (openaiWs && openaiWs.readyState === WebSocket.OPEN) openaiWs.close(1000)
