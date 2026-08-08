@@ -112,7 +112,7 @@ async function loadCookState(token) {
   try {
     const { data, error } = await tokenClient(token)
       .from('cook_sessions')
-      .select('lines, updated_at')
+      .select('lines, updated_at, language')
       .maybeSingle()
     if (error || !data || !data.updated_at) return null
     if (Date.now() - new Date(data.updated_at).getTime() > RESUME_WINDOW_MS) return null
@@ -131,6 +131,7 @@ async function clearCookState(token, userId) {
     await tokenClient(token).from('cook_sessions').upsert({
       user_id: userId,
       lines: [],
+      language: null,
       updated_at: new Date().toISOString(),
     })
   } catch (err) {
@@ -138,17 +139,52 @@ async function clearCookState(token, userId) {
   }
 }
 
-async function saveCookState(token, userId, lines) {
+async function saveCookState(token, userId, lines, language) {
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !token || !userId || lines.length === 0) return
   try {
     await tokenClient(token).from('cook_sessions').upsert({
       user_id: userId,
       lines,
+      language: language || null,
       updated_at: new Date().toISOString(),
     })
   } catch (err) {
     console.error('[cook] save failed:', err.message)
   }
+}
+
+// ── Guest cook-session resume (in-memory — guests have no auth.uid(), so the
+// RLS-scoped cook_sessions table can never hold their state; that's by design,
+// not a bug). Keyed by a random id the client keeps in sessionStorage for the
+// tab's life. Lost on a server restart — same as any OpenAI Realtime session
+// losing its own history on any drop, so that's an acceptable ceiling.
+const GUEST_COOK_CAP = 300
+const guestCookState = new Map() // guestId -> { lines, language, updatedAt }
+
+function loadGuestCookState(guestId) {
+  if (!guestId) return null
+  const entry = guestCookState.get(guestId)
+  if (!entry) return null
+  if (Date.now() - entry.updatedAt > RESUME_WINDOW_MS) {
+    guestCookState.delete(guestId)
+    return null
+  }
+  if (!Array.isArray(entry.lines) || entry.lines.length === 0) return null
+  return { lines: entry.lines, updated_at: new Date(entry.updatedAt).toISOString(), language: entry.language || null }
+}
+
+function saveGuestCookState(guestId, lines, language) {
+  if (!guestId || lines.length === 0) return
+  if (!guestCookState.has(guestId) && guestCookState.size >= GUEST_COOK_CAP) {
+    const oldest = [...guestCookState.entries()].sort((a, b) => a[1].updatedAt - b[1].updatedAt)[0]
+    if (oldest) guestCookState.delete(oldest[0])
+  }
+  guestCookState.set(guestId, { lines, updatedAt: Date.now(), language: language || null })
+}
+
+function clearGuestCookState(guestId) {
+  if (!guestId) return
+  guestCookState.delete(guestId)
 }
 
 function resumeInstruction(cookState) {
@@ -157,6 +193,14 @@ function resumeInstruction(cookState) {
     .map((l) => `${l.who === 'user' ? 'User' : 'You'}: ${l.text}`)
     .join('\n')
   return `\n\nEarlier today you were already cooking with this user, then the conversation was interrupted. The last things said were:\n${convo}\n\nInstead of any other opening, begin by warmly picking up where you left off — in one short sentence remind them exactly where you were (the dish and the step), then continue guiding from there. If that earlier conversation clearly shows the dish was finished, ignore it and instead say, in the session language, a line with exactly this meaning: "Welcome back! What ingredients are we working with today?" Never reintroduce yourself, never say your own name, and never say hello as if meeting them — you are mid-conversation with someone you know. Speak in the session language given above, even if that earlier conversation happened in a different language — and if the user now speaks a different language in full clear sentences, follow the user. Say the welcome-back line in the session language too.`
+}
+
+// A reconnect happened (client-confirmed a real conversation was already under
+// way), but there is no cookState to resume — expired, never saved in time, or
+// this server restarted. Never let Micheli claim a dish, ingredient, or step
+// that isn't backed by real state above; ask instead of inventing one.
+function droppedReconnectInstruction(lang) {
+  return `\n\nThe connection just dropped and reconnected, but you have no record of what was being cooked before — do not guess, invent, or name any dish, ingredient, or step. In one short sentence in ${lang}, acknowledge you lost the connection and ask what they were cooking, or what they have to cook with. Never reintroduce yourself or say your own name — they already know you, you just don't have this cook's details.`
 }
 
 // ── Long-term memory ─────────────────────────────────────────────────────────
@@ -451,6 +495,9 @@ wss.on('connection', (browserWs, req) => {
   let memory = null // long-term summary of past sessions, if any
   let intentionalEnd = false // user tapped "End session" — close the cook, don't resume it
   let clientLanguage = null // explicit language pick sent by the app, if any
+  let guestId = null // client-generated id for this guest's resume slot, if any
+  let isReconnect = false // true only when the client confirms this is its automatic drop-recovery path, not a fresh start
+  let sessionLanguage = null // set once decided, so a later flush can persist it
   const headerLanguage = languageFromHeader(req)
   const pending = []
 
@@ -458,9 +505,10 @@ wss.on('connection', (browserWs, req) => {
   const transcript = []
   let linesSinceFlush = 0
   const flushCookState = () => {
-    if (!authToken || !user || transcript.length === 0) return
+    if (transcript.length === 0) return
     linesSinceFlush = 0
-    saveCookState(authToken, user.id, transcript.slice(-14)) // fire and forget
+    if (authToken && user) saveCookState(authToken, user.id, transcript.slice(-14), sessionLanguage)
+    else if (guestId) saveGuestCookState(guestId, transcript.slice(-14), sessionLanguage)
   }
 
   const startOpenAI = () => {
@@ -477,8 +525,11 @@ wss.on('connection', (browserWs, req) => {
     const profileLanguage =
       profile && typeof profile.language === 'string' && KNOWN_LANGUAGES.has(profile.language)
         ? profile.language : null
-    const sessionLanguage = clientLanguage || profileLanguage || headerLanguage || 'English'
-    console.log(`[WS] session language: ${sessionLanguage} (pick=${clientLanguage || '—'}, profile=${profileLanguage || '—'}, device=${headerLanguage || '—'})`)
+    const resumedLanguage =
+      cookState && typeof cookState.language === 'string' && KNOWN_LANGUAGES.has(cookState.language)
+        ? cookState.language : null
+    sessionLanguage = resumedLanguage || clientLanguage || profileLanguage || headerLanguage || 'English'
+    console.log(`[WS] session language: ${sessionLanguage} (resumed=${resumedLanguage || '—'}, pick=${clientLanguage || '—'}, profile=${profileLanguage || '—'}, device=${headerLanguage || '—'})`)
     // NOTE (2026-08-04): the server used to push an `sc.session` status frame to
     // the browser here, and a `language` hint into the transcriber below. Both
     // are held back while we test whether they caused the audio breakup Tai
@@ -494,7 +545,11 @@ wss.on('connection', (browserWs, req) => {
           languageInstruction(sessionLanguage) +
           dietaryRules(profile) +
           memoryInstruction(memory) +
-          (cookState ? resumeInstruction(cookState) : greetingInstruction(profile, sessionLanguage)),
+          (cookState
+            ? resumeInstruction(cookState)
+            : isReconnect
+              ? droppedReconnectInstruction(sessionLanguage)
+              : greetingInstruction(profile, sessionLanguage)),
         audio: {
           input: {
             format: { type: 'audio/pcm', rate: 24000 },
@@ -534,9 +589,9 @@ wss.on('connection', (browserWs, req) => {
 
   openaiWs.on('message', (data, isBinary) => {
     if (browserWs.readyState === WebSocket.OPEN) browserWs.send(data, { binary: isBinary })
-    // Capture final transcript lines for resume-after-lock (signed-in users only).
+    // Capture final transcript lines for resume-after-lock (signed-in users and tracked guests).
     // Only frames that can carry a finished transcript are parsed — audio deltas are not.
-    if (user) {
+    if (user || guestId) {
       const head = data.toString('utf8', 0, 200)
       if (
         head.includes('output_audio_transcript.done') ||
@@ -599,6 +654,7 @@ wss.on('connection', (browserWs, req) => {
         if (JSON.parse(text).type === 'end_session') {
           intentionalEnd = true
           if (user && authToken) clearCookState(authToken, user.id)
+          else if (guestId) clearGuestCookState(guestId)
           return
         }
       } catch { /* fall through — treat as a normal frame */ }
@@ -612,6 +668,7 @@ wss.on('connection', (browserWs, req) => {
         if (typeof parsed.language === 'string' && KNOWN_LANGUAGES.has(parsed.language.trim())) {
           clientLanguage = parsed.language.trim()
         }
+        isReconnect = parsed.isReconnect === true
         authInFlight = true
         clearTimeout(authTimer)
         user = await verifyUser(parsed.token)
@@ -622,8 +679,11 @@ wss.on('connection', (browserWs, req) => {
             loadCookState(parsed.token),
             loadMemory(parsed.token),
           ])
+        } else if (typeof parsed.guestId === 'string' && parsed.guestId.length >= 8 && parsed.guestId.length <= 100) {
+          guestId = parsed.guestId
+          cookState = loadGuestCookState(guestId)
         }
-        console.log(`[WS] auth: ${user ? `user ${user.id}` : 'guest'}${profile ? ' (profile loaded)' : ''}${cookState ? ' (resuming cook)' : ''}${memory ? ' (memory loaded)' : ''}`)
+        console.log(`[WS] auth: ${user ? `user ${user.id}` : guestId ? 'guest (tracked)' : 'guest'}${profile ? ' (profile loaded)' : ''}${cookState ? ' (resuming cook)' : ''}${memory ? ' (memory loaded)' : ''}${isReconnect ? ' (reconnect)' : ''}`)
         authInFlight = false
         startOpenAI()
         return // the auth frame itself is never forwarded to OpenAI

@@ -19,6 +19,7 @@ adopts it), update the entry here first, then use it.
 | Provider             | OpenAI          | ratified 2026-07-14 |
 | Recipe/chat model    | gpt-4o          | ratified 2026-07-14 |
 | Realtime voice model | gpt-realtime    | ratified 2026-07-14 |
+| Realtime voice model (test sessions only, never real users) | gpt-realtime-2.1-mini | ratified 2026-08-08 — Tai-supplied, confirmed live via GET /v1/models same date. Do not use for any non-test session. |
 | Realtime voice       | shimmer         | ratified 2026-07-14 |
 | Voice transcription  | gpt-4o-transcribe | ratified 2026-07-29 (replaced whisper-1: silence hallucinations) |
 

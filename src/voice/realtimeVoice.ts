@@ -34,9 +34,29 @@ export class RealtimeVoice {
   private intentionalEnd = false
   private reconnectAttempts = 0
   private reconnectTimer: number | null = null
+  private hasStartedConversation = false // true once a real greeting/resume has actually fired
+  private guestId: string
 
   constructor(callbacks: VoiceCallbacks) {
     this.cb = callbacks
+    this.guestId = this.loadOrCreateGuestId()
+  }
+
+  // A guest's cook-state resume key. sessionStorage-scoped — this tab, this page
+  // load only. Never crosses tabs, never survives the tab closing, carries no
+  // identity of its own.
+  private loadOrCreateGuestId(): string {
+    try {
+      const existing = window.sessionStorage.getItem('sc_guest_id')
+      if (existing) return existing
+      const fresh = typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `g-${Date.now()}-${Math.random().toString(36).slice(2)}`
+      window.sessionStorage.setItem('sc_guest_id', fresh)
+      return fresh
+    } catch {
+      return `g-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    }
   }
 
   /** Must be called inside a user gesture — unlocks AudioContext on iOS/Safari. */
@@ -61,6 +81,7 @@ export class RealtimeVoice {
     this.getLanguage = languageProvider ?? null
     this.intentionalEnd = false
     this.reconnectAttempts = 0
+    this.hasStartedConversation = false
     this.openSocket()
   }
 
@@ -69,17 +90,22 @@ export class RealtimeVoice {
     this.cb.onStatus('connecting')
     this.ws.onopen = async () => {
       // Identify the signed-in user to the server before any audio flows.
-      // Guests send token: null and get an anonymous session. The token is
-      // fetched fresh on every (re)connect so it can never be stale.
+      // Guests send token: null and get an anonymous session, tracked by a
+      // stable guestId so a guest can resume too. The token is fetched fresh on
+      // every (re)connect so it can never be stale.
       const token = this.getToken ? await this.getToken() : null
       const language = this.getLanguage ? this.getLanguage() : null
-      this.wsSend({ type: 'auth', token, language })
-      const wasReconnect = this.reconnectAttempts > 0
+      const isReconnectAttempt = this.reconnectAttempts > 0
+      // Only tell the server "treat this as a real interrupted cook" once a
+      // conversation had actually started — otherwise a blip during the very
+      // first handshake would wrongly skip a first-time user's introduction.
+      const isReconnect = isReconnectAttempt && this.hasStartedConversation
+      this.wsSend({ type: 'auth', token, language, guestId: this.guestId, isReconnect })
       this.reconnectAttempts = 0
       this.cb.onStatus('ready')
-      if (wasReconnect) {
-        // Language was re-sent in the auth frame above; the server reloads the
-        // cook state. Force the resume framing so she continues, never re-greets.
+      if (isReconnectAttempt) {
+        // The server already decided what's true to say — grounded resume, an
+        // honest "we got disconnected," or a first greeting. Just ask for it.
         this.triggerResume()
         this.startListening()
       }
@@ -140,29 +166,20 @@ export class RealtimeVoice {
   }
 
   triggerGreeting(): void {
+    this.hasStartedConversation = true
     this.wsSend({ type: 'input_audio_buffer.clear' })
     this.wsSend({ type: 'response.create' })
   }
 
   /**
-   * Reconnect after an unexpected drop. Language is already re-sent in the auth
-   * frame; the server reloads cook state and briefs Micheli via its resume path.
-   * This overrides instructions for the single reconnect response so she resumes
-   * the current step and never re-introduces herself — even if the server's
-   * cook-state write lost the race with the reconnect.
+   * Reconnect after an unexpected drop. The server already knows — from real
+   * cook state, or its absence — what's true to say: a grounded resume, an
+   * honest "we got disconnected, what were we cooking," or a first greeting.
+   * This must never add a claim of its own; that override is exactly what let
+   * Micheli invent a dish once the real state didn't survive a drop.
    */
   triggerResume(): void {
-    this.wsSend({ type: 'input_audio_buffer.clear' })
-    this.wsSend({
-      type: 'response.create',
-      response: {
-        instructions:
-          'This is an automatic reconnect after the connection dropped mid-cook. ' +
-          'Do not greet, do not introduce yourself, do not say your name, do not say hello. ' +
-          'In one short sentence, remind them which dish and step you were on, then ' +
-          'continue guiding from exactly there, in the current session language.',
-      },
-    })
+    this.triggerGreeting()
   }
 
   async startListening(): Promise<void> {
