@@ -37,6 +37,7 @@ moved to the OpenAI Realtime API. Do not reintroduce tts-1 or nova.
 | SUPABASE_ANON_KEY      | Express server      | ratified 2026-07-23 — anon/publishable key ONLY; the server must never hold the service-role key |
 | VITE_SUPABASE_URL      | Vite client build   | ratified 2026-07-23 — long in use            |
 | VITE_SUPABASE_ANON_KEY | Vite client build   | ratified 2026-07-23 — long in use            |
+| VOICE_TEST_TOKEN       | Express server      | ratified 2026-08-08 — gates gpt-realtime-2.1-mini for Tai's own test voice sessions only. Server-side only, NEVER a VITE_ variable — must never reach the client bundle. Name only here; Tai sets the actual value directly in Railway Variables and local .env. |
 
 Both are set in local `.env` / `server/.env` AND in Railway Variables. A key that
 exists in one place but not the other is a classic ShareChef failure — verify both.

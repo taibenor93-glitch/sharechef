@@ -25,7 +25,11 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 // Current OpenAI realtime model (the older gpt-4o-realtime-preview was retired).
 const REALTIME_MODEL = 'gpt-realtime'
 const REALTIME_VOICE = 'shimmer'
-const REALTIME_URL = `wss://api.openai.com/v1/realtime?model=${REALTIME_MODEL}`
+// Test sessions only (never real users) — gated by VOICE_TEST_TOKEN below.
+const REALTIME_MODEL_TEST = 'gpt-realtime-2.1-mini'
+function realtimeUrlFor(model) {
+  return `wss://api.openai.com/v1/realtime?model=${model}`
+}
 
 const MICHELI_PROMPT = `You are Micheli, the warm, accomplished voice of ShareChef AI — a personal cooking companion. You are a woman in your forties with the easy confidence of a seasoned chef and the warmth of someone who genuinely loves feeding people. Your American voice is soft, friendly, and quietly inspiring. You make people feel capable, never judged.
 
@@ -498,6 +502,8 @@ wss.on('connection', (browserWs, req) => {
   let guestId = null // client-generated id for this guest's resume slot, if any
   let isReconnect = false // true only when the client confirms this is its automatic drop-recovery path, not a fresh start
   let sessionLanguage = null // set once decided, so a later flush can persist it
+  let activeModel = REALTIME_MODEL // overridden to REALTIME_MODEL_TEST only by a verified VOICE_TEST_TOKEN match
+  let isTestSession = false
   const headerLanguage = languageFromHeader(req)
   const pending = []
 
@@ -516,12 +522,12 @@ wss.on('connection', (browserWs, req) => {
     started = true
     let openaiHeartbeat = null
 
-    openaiWs = new WebSocket(REALTIME_URL, {
+    openaiWs = new WebSocket(realtimeUrlFor(activeModel), {
     headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
   })
 
   openaiWs.on('open', () => {
-    console.log(`[WS] Connected to OpenAI Realtime (${REALTIME_MODEL}, voice=${REALTIME_VOICE}, user=${user ? user.id : 'guest'})`)
+    console.log(`[WS] Connected to OpenAI Realtime (${activeModel}, voice=${REALTIME_VOICE}, user=${user ? user.id : 'guest'}${isTestSession ? ', TEST MODEL' : ''})`)
     const profileLanguage =
       profile && typeof profile.language === 'string' && KNOWN_LANGUAGES.has(profile.language)
         ? profile.language : null
@@ -669,6 +675,11 @@ wss.on('connection', (browserWs, req) => {
           clientLanguage = parsed.language.trim()
         }
         isReconnect = parsed.isReconnect === true
+        const voiceTestToken = process.env.VOICE_TEST_TOKEN
+        if (voiceTestToken && typeof parsed.testToken === 'string' && parsed.testToken === voiceTestToken) {
+          activeModel = REALTIME_MODEL_TEST
+          isTestSession = true
+        }
         authInFlight = true
         clearTimeout(authTimer)
         user = await verifyUser(parsed.token)
@@ -683,7 +694,7 @@ wss.on('connection', (browserWs, req) => {
           guestId = parsed.guestId
           cookState = loadGuestCookState(guestId)
         }
-        console.log(`[WS] auth: ${user ? `user ${user.id}` : guestId ? 'guest (tracked)' : 'guest'}${profile ? ' (profile loaded)' : ''}${cookState ? ' (resuming cook)' : ''}${memory ? ' (memory loaded)' : ''}${isReconnect ? ' (reconnect)' : ''}`)
+        console.log(`[WS] auth: ${user ? `user ${user.id}` : guestId ? 'guest (tracked)' : 'guest'}${profile ? ' (profile loaded)' : ''}${cookState ? ' (resuming cook)' : ''}${memory ? ' (memory loaded)' : ''}${isReconnect ? ' (reconnect)' : ''}${isTestSession ? ' (TEST MODEL)' : ''}`)
         authInFlight = false
         startOpenAI()
         return // the auth frame itself is never forwarded to OpenAI

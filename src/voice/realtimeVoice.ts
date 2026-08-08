@@ -100,7 +100,12 @@ export class RealtimeVoice {
       // conversation had actually started — otherwise a blip during the very
       // first handshake would wrongly skip a first-time user's introduction.
       const isReconnect = isReconnectAttempt && this.hasStartedConversation
-      this.wsSend({ type: 'auth', token, language, guestId: this.guestId, isReconnect })
+      // Set once, by hand, in your own browser devtools only:
+      //   localStorage.setItem('sc_voice_test_token', '<the VOICE_TEST_TOKEN value>')
+      // Never read from a bundled env var — that would ship it to every visitor.
+      let testToken: string | null = null
+      try { testToken = window.localStorage.getItem('sc_voice_test_token') } catch { /* ignore */ }
+      this.wsSend({ type: 'auth', token, language, guestId: this.guestId, isReconnect, testToken })
       this.reconnectAttempts = 0
       this.cb.onStatus('ready')
       if (isReconnectAttempt) {
