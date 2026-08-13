@@ -36,6 +36,11 @@ export class RealtimeVoice {
   private reconnectTimer: number | null = null
   private hasStartedConversation = false // true once a real greeting/resume has actually fired
   private guestId: string
+  // Screen Wake Lock: keeps the display on during an active cook so iOS never
+  // freezes the page mid-recipe. Auto-released by the OS when the page hides;
+  // re-acquired on return via visibilitychange. No-op on browsers without it.
+  private wakeLock: { release: () => Promise<void> } | null = null
+  private onVisibilityChange: (() => void) | null = null
 
   constructor(callbacks: VoiceCallbacks) {
     this.cb = callbacks
@@ -56,6 +61,42 @@ export class RealtimeVoice {
       return fresh
     } catch {
       return `g-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    }
+  }
+
+  /**
+   * Keep the screen awake while a cook is active. Zero-touch depends on it:
+   * a locked screen freezes the page, kills the socket, and breaks the flow.
+   * Safe everywhere — browsers without the API (or a hidden page) just skip it.
+   */
+  private async acquireWakeLock(): Promise<void> {
+    const wl = (navigator as any).wakeLock
+    if (!wl || document.visibilityState !== 'visible') return
+    try {
+      this.wakeLock = await wl.request('screen')
+    } catch {
+      /* denied (low battery, etc.) — session still works, just without the lock */
+    }
+    if (!this.onVisibilityChange) {
+      // The OS silently drops the lock whenever the page hides; take it back
+      // the moment the user returns, for as long as the session is alive.
+      this.onVisibilityChange = () => {
+        if (document.visibilityState === 'visible' && !this.intentionalEnd) {
+          void this.acquireWakeLock()
+        }
+      }
+      document.addEventListener('visibilitychange', this.onVisibilityChange)
+    }
+  }
+
+  private releaseWakeLock(): void {
+    if (this.onVisibilityChange) {
+      document.removeEventListener('visibilitychange', this.onVisibilityChange)
+      this.onVisibilityChange = null
+    }
+    if (this.wakeLock) {
+      void this.wakeLock.release().catch(() => {})
+      this.wakeLock = null
     }
   }
 
@@ -82,6 +123,7 @@ export class RealtimeVoice {
     this.intentionalEnd = false
     this.reconnectAttempts = 0
     this.hasStartedConversation = false
+    void this.acquireWakeLock()
     this.openSocket()
   }
 
@@ -146,6 +188,7 @@ export class RealtimeVoice {
 
   disconnect(): void {
     this.intentionalEnd = true
+    this.releaseWakeLock()
     if (this.reconnectTimer !== null) {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null
