@@ -3,7 +3,11 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { supabase } from '../lib/supabaseClient'
 import { API_BASE } from '../lib/apiBase'
-import { purgeAccountLocal } from '../lib/events'
+import {
+  purgeAccountLocal,
+  resumeAnalyticsAfterFailedDeletion,
+  suspendAnalyticsForAccountDeletion,
+} from '../lib/events'
 import { resetIdentity } from '../lib/session'
 
 export function PreferencesPage() {
@@ -12,8 +16,8 @@ export function PreferencesPage() {
 
   // ── Account deletion (Revision 6) ──────────────────────────────────────────
   // Password re-entry goes ONLY to Supabase auth (signInWithPassword) — never
-  // to the ShareChef server. The fresh sign-in updates last_sign_in_at, which
-  // the server requires within a narrow window before any deletion.
+  // to the ShareChef server. The server requires the verified JWT's password
+  // authentication-method timestamp to fall inside a narrow window.
   const [delStep, setDelStep] = useState<'closed' | 'form' | 'working' | 'done'>('closed')
   const [delPassword, setDelPassword] = useState('')
   const [delConfirmed, setDelConfirmed] = useState(false)
@@ -37,6 +41,9 @@ export function PreferencesPage() {
         setDelStep('form')
         return
       }
+      // Stop and drain analytics before the server purges this installation.
+      // Otherwise an already-running delivery could land after the purge.
+      await suspendAnalyticsForAccountDeletion()
       // 2) Server-side permanent deletion, account derived from the token only.
       let res: Response | null = null
       try {
@@ -49,7 +56,19 @@ export function PreferencesPage() {
           body: '{}',
         })
       } catch { res = null }
-      if (!res || !res.ok) {
+      if (!res) {
+        // The request may have completed even though its response was lost.
+        // Retire local identifiers and sign out rather than risk resurrecting
+        // pre-deletion analytics. If the account still exists, the user can
+        // sign back in and retry safely.
+        await purgeAccountLocal(userId)
+        await resetIdentity()
+        await supabase.auth.signOut({ scope: 'local' }).catch(() => undefined)
+        navigate('/login', { replace: true, state: { message: 'We could not confirm the deletion. Sign in again to verify your account status.' } })
+        return
+      }
+      if (!res.ok) {
+        resumeAnalyticsAfterFailedDeletion()
         setDelError(
           res?.status === 429
             ? 'Too many attempts. Please wait an hour and try again.'
@@ -61,9 +80,10 @@ export function PreferencesPage() {
       // 3) Server confirmed. Erase the local session IMMEDIATELY — the old JWT
       //    can remain technically valid until it expires, so nothing here may
       //    keep using it. Then rotate the installation identity.
-      try { await purgeAccountLocal(userId) } catch { /* never block sign-out */ }
-      try { await resetIdentity() } catch { /* never block sign-out */ }
-      try { await supabase.auth.signOut() } catch { /* local session is cleared regardless */ }
+      await purgeAccountLocal(userId)
+      await resetIdentity()
+      await supabase.auth.signOut({ scope: 'local' }).catch(() => undefined)
+      setDelPassword('')
       setDelStep('done')
       setTimeout(() => navigate('/login', { replace: true }), 2200)
     } catch {

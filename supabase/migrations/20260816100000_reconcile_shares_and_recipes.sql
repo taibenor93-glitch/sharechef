@@ -4,16 +4,17 @@
 -- production and is fully idempotent: it no-ops wherever the target state
 -- already holds, so applying it anywhere is safe.
 
--- shares: existed in production without a repo migration. Captured 1:1.
-create table if not exists public.shares (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid not null default auth.uid() references auth.users (id) on delete cascade,
-  recipe_id text,
-  channel text not null default 'native',
-  created_at timestamptz not null default now()
-);
-
-alter table public.shares enable row level security;
+-- shares exists in production, but its RLS policies and grants have not yet
+-- been captured. Deliberately do NOT create it or change RLS here: enabling RLS
+-- without the production policies could break sharing, while creating it with
+-- RLS disabled would expose data in a fresh environment. A separate verified
+-- baseline migration must capture columns, grants, RLS state, and every policy.
+do $$
+begin
+  if to_regclass('public.shares') is null then
+    raise notice 'public.shares is absent; verified shares baseline migration still required';
+  end if;
+end $$;
 
 -- recipes.user_id: production already has ON DELETE CASCADE (the original repo
 -- migration lacked the clause). Converge only when the rule differs.

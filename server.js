@@ -13,7 +13,7 @@ dotenv.config()
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 
-const app = express()
+export const app = express()
 const server = createServer(app)
 const PORT = process.env.PORT || 3000
 
@@ -64,10 +64,10 @@ app.use('/api/events', (err, _req, res, _next) => {
 })
 
 // ── Account deletion (Revision 6) ────────────────────────────────────────────
-// PERMANENT, privacy-first account deletion. Requires a RECENT password
-// sign-in: Supabase sets last_sign_in_at only on a genuine sign-in
-// (signInWithPassword) — a silently refreshed JWT does NOT update it, so a
-// long-lived stolen session can never delete an account without the password.
+// PERMANENT, privacy-first account deletion. Requires a RECENT password method
+// entry in the verified JWT's `amr` claim. Refreshing a session can issue a new
+// token but does not turn the original authentication method timestamp into a
+// new password proof.
 // The password itself goes only from the client to Supabase auth; this server
 // never sees, accepts, or logs it.
 // Analytics removal is explicit and privacy-first (reviewer-approved): every
@@ -88,13 +88,17 @@ function deleteRateLimited(key) {
   return b.count > DELETE_MAX_PER_HOUR
 }
 
-// True only for a genuine, RECENT password sign-in. Refresh-only sessions keep
-// their original last_sign_in_at and therefore fail this check.
-function isRecentSignIn(lastSignInAt, now = Date.now()) {
-  const t = Date.parse(String(lastSignInAt ?? ''))
-  if (!Number.isFinite(t)) return false
-  if (t > now + 60_000) return false // clock skew tolerance; far-future is invalid
-  return now - t <= REAUTH_WINDOW_MS
+// Supabase JWT `amr` timestamps are epoch seconds. Require a password entry in
+// the narrow window; account-wide last_sign_in_at is not sufficient because a
+// login on another device could otherwise authorize this token.
+function isRecentPasswordAuth(amr, now = Date.now()) {
+  if (!Array.isArray(amr)) return false
+  return amr.some((entry) => {
+    if (!entry || entry.method !== 'password' || !Number.isFinite(entry.timestamp)) return false
+    const t = Number(entry.timestamp) * 1000
+    if (t > now + 60_000) return false
+    return now - t <= REAUTH_WINDOW_MS
+  })
 }
 
 // Admin client (service-role) — created lazily, server-side only. Independent of
@@ -110,22 +114,30 @@ function adminClient() {
   return adminDb
 }
 
-// Verified identity for deletion: id + last_sign_in_at from the auth server.
-// SC_TEST_FAKE_AUTH=1 is a TEST-ONLY seam (never set in production): accepts
-// "test:<uuid>:<epochMs>" bearer tokens with zero network. Gated hard on env.
+function decodeJwtPayload(token) {
+  try {
+    const parts = String(token).split('.')
+    if (parts.length !== 3) return null
+    return JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'))
+  } catch { return null }
+}
+
+// Verify the token with Supabase first, then read its signed claims. There is
+// deliberately no environment-controlled fake-token path in production code.
 async function verifyUserForDeletion(token) {
-  if (process.env.SC_TEST_FAKE_AUTH === '1' && typeof token === 'string' && token.startsWith('test:')) {
-    const [, id, ms] = token.split(':')
-    if (UUID_RE.test(String(id))) return { id: String(id), last_sign_in_at: new Date(Number(ms)).toISOString() }
-    return null
-  }
   if (!supabaseAuth || !token) return null
   try {
     const { data, error } = await supabaseAuth.auth.getUser(token)
     if (error || !data?.user) return null
-    return { id: data.user.id, last_sign_in_at: data.user.last_sign_in_at ?? null }
+    const claims = decodeJwtPayload(token)
+    if (!claims || claims.sub !== data.user.id) return null
+    return { id: data.user.id, amr: claims.amr }
   } catch { return null }
 }
+
+// In-process dependency seam for offline tests. It is unreachable over HTTP
+// and cannot be activated by a production environment variable.
+let deletionUserVerifier = verifyUserForDeletion
 
 // Core deletion, separated for direct testing with a fake db. Idempotent and
 // retry-safe: re-running any step removes nothing new; after a partial failure
@@ -163,9 +175,9 @@ app.post('/api/account/delete', express.json({ limit: '1kb' }), async (req, res)
       return res.status(400).json({ error: 'no body fields accepted' })
     }
     if (deleteRateLimited(req.ip || 'unknown')) return res.status(429).json({ error: 'rate limited' })
-    const user = await verifyUserForDeletion(token)
+    const user = await deletionUserVerifier(token)
     if (!user) return res.status(401).json({ error: 'invalid token' })
-    if (!isRecentSignIn(user.last_sign_in_at)) {
+    if (!isRecentPasswordAuth(user.amr)) {
       return res.status(403).json({ error: 'recent sign-in required' })
     }
     const db = adminClient()
@@ -1107,4 +1119,14 @@ if (!process.env.SC_TEST_NO_LISTEN) {
 }
 
 // Test-only surface (harmless in production; used by tests/ with SC_TEST_NO_LISTEN=1).
-export const __test = { validateEvent, EVENT_NAMES_CLIENT, EVENT_NAMES_SERVER, emitServerEvent, performAccountDeletion, isRecentSignIn }
+export const __test = {
+  validateEvent,
+  EVENT_NAMES_CLIENT,
+  EVENT_NAMES_SERVER,
+  emitServerEvent,
+  performAccountDeletion,
+  isRecentPasswordAuth,
+  setDeletionUserVerifier(fn) { deletionUserVerifier = fn },
+  resetDeletionUserVerifier() { deletionUserVerifier = verifyUserForDeletion },
+  resetDeleteRateLimit() { deleteBuckets.clear() },
+}

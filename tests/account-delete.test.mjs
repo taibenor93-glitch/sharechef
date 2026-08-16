@@ -1,11 +1,10 @@
 // Account deletion endpoint + core-procedure tests (Revision 6).
 // Run: node tests/account-delete.test.mjs
-// HTTP phase spawns a real server with SUPABASE_URL='' (no auth client, no
-// admin client, no network possible) and SC_TEST_FAKE_AUTH=1 (offline bearer
-// tokens "test:<uuid>:<epochMs>"). Core phase imports server.js in-process
-// (SC_TEST_NO_LISTEN=1) and drives performAccountDeletion against a FAKE db.
+// HTTP phase starts the exported Express app in-process with SUPABASE_URL=''
+// (no auth/admin client and no network possible) and injects a verifier through
+// an in-process-only test seam. Production contains no fake-token env path.
+// Core phase drives performAccountDeletion against a FAKE db.
 // No live service is ever contacted.
-import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
@@ -15,16 +14,6 @@ const results = []
 function check(name, cond, detail = '') {
   results.push({ name, pass: !!cond })
   console.log(`${cond ? 'PASS' : 'FAIL'}  ${name}${detail ? ` — ${detail}` : ''}`)
-}
-
-function startServer(port, extraEnv) {
-  const child = spawn('node', ['server.js'], {
-    env: { ...process.env, PORT: String(port), SUPABASE_URL: '', SUPABASE_ANON_KEY: '', SUPABASE_SERVICE_KEY: '', EVENTS_ENABLED: '', SC_TEST_FAKE_AUTH: '1', ...extraEnv },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  })
-  child.stdout.on('data', () => {})
-  child.stderr.on('data', () => {})
-  return child
 }
 
 async function del(port, { token, body } = {}) {
@@ -42,8 +31,19 @@ const freshToken = (id = randomUUID()) => `test:${id}:${Date.now()}`
 const staleToken = (id = randomUUID()) => `test:${id}:${Date.now() - 10 * 60 * 1000}` // 10 min old
 
 // ── Phase A: HTTP guards (offline server) ────────────────────────────────────
-const srv = startServer(3111)
-await sleep(2500)
+process.env.SC_TEST_NO_LISTEN = '1'
+process.env.SUPABASE_URL = ''
+process.env.SUPABASE_ANON_KEY = ''
+process.env.SUPABASE_SERVICE_KEY = ''
+process.env.EVENTS_ENABLED = ''
+const { app, __test } = await import('../server.js')
+__test.setDeletionUserVerifier(async (token) => {
+  const [prefix, id, ms] = String(token).split(':')
+  if (prefix !== 'test' || !/^[0-9a-f-]{36}$/i.test(id) || !Number.isFinite(Number(ms))) return null
+  return { id, amr: [{ method: 'password', timestamp: Number(ms) / 1000 }] }
+})
+const srv = app.listen(3111)
+await sleep(100)
 {
   const r = await del(3111, {})
   check('missing JWT → 401', r.status === 401)
@@ -64,21 +64,20 @@ await sleep(2500)
   const r = await del(3111, { token: freshToken() })
   check('recent sign-in passes reauth gate (503 only because no service key here)', r.status === 503 && r.json?.error === 'deletion not configured')
 }
-srv.kill()
+await new Promise((resolve) => srv.close(resolve))
 
 // Rate limiting on its own server so counts are deterministic.
-const rlSrv = startServer(3112)
-await sleep(2500)
+__test.resetDeleteRateLimit()
+const rlSrv = app.listen(3112)
+await sleep(100)
 {
   const statuses = []
   for (let i = 0; i < 6; i++) statuses.push((await del(3112, { token: freshToken() })).status)
   check('rate limit: first 5 pass the limiter, 6th → 429', statuses.slice(0, 5).every((s) => s === 503) && statuses[5] === 429, statuses.join(','))
 }
-rlSrv.kill()
+await new Promise((resolve) => rlSrv.close(resolve))
 
 // ── Phase B: core deletion procedure with a fake db (in-process) ─────────────
-process.env.SC_TEST_NO_LISTEN = '1'
-const { __test } = await import('../server.js')
 
 function makeFakeDb(rows, opts = {}) {
   const calls = { deletedUsers: [], softFlags: [] }
@@ -178,11 +177,13 @@ function scenarioRows() {
 {
   // Reauth window logic (pure).
   const now = Date.now()
-  check('isRecentSignIn: just signed in → true', __test.isRecentSignIn(new Date(now - 5_000).toISOString(), now) === true)
-  check('isRecentSignIn: 4m59s ago → true', __test.isRecentSignIn(new Date(now - 299_000).toISOString(), now) === true)
-  check('isRecentSignIn: 6 minutes ago → false (refresh-only session blocked)', __test.isRecentSignIn(new Date(now - 360_000).toISOString(), now) === false)
-  check('isRecentSignIn: missing/garbage → false', __test.isRecentSignIn(null, now) === false && __test.isRecentSignIn('nope', now) === false)
-  check('isRecentSignIn: far-future timestamp → false', __test.isRecentSignIn(new Date(now + 120_000).toISOString(), now) === false)
+  const amr = (method, ms) => [{ method, timestamp: ms / 1000 }]
+  check('recent password AMR: just signed in → true', __test.isRecentPasswordAuth(amr('password', now - 5_000), now) === true)
+  check('recent password AMR: 4m59s ago → true', __test.isRecentPasswordAuth(amr('password', now - 299_000), now) === true)
+  check('stale password AMR → false', __test.isRecentPasswordAuth(amr('password', now - 360_000), now) === false)
+  check('fresh token-refresh AMR is not password proof', __test.isRecentPasswordAuth(amr('token_refresh', now - 1_000), now) === false)
+  check('missing/garbage AMR → false', __test.isRecentPasswordAuth(null, now) === false && __test.isRecentPasswordAuth('nope', now) === false)
+  check('far-future password timestamp → false', __test.isRecentPasswordAuth(amr('password', now + 120_000), now) === false)
 }
 
 // ── Phase C: 12-month purge semantics (predicate simulation) ─────────────────
@@ -204,7 +205,7 @@ function scenarioRows() {
 // ── Phase D: migration content checks ────────────────────────────────────────
 {
   const rec = readFileSync('supabase/migrations/20260816100000_reconcile_shares_and_recipes.sql', 'utf8')
-  check('migration: shares captured idempotently with CASCADE', rec.includes('create table if not exists public.shares') && rec.includes('on delete cascade'))
+  check('migration: shares left untouched until grants/RLS policies are verified', !rec.includes('create table if not exists public.shares') && !rec.includes('alter table public.shares enable row level security'))
   check('migration: recipes FK converges to CASCADE only when different', rec.includes('recipes_user_id_fkey') && rec.includes('confdeltype') && rec.includes("is distinct from 'c'"))
   const ae = readFileSync('supabase/migrations/20260816101000_app_events_user_cascade.sql', 'utf8')
   check('migration: app_events.user_id defense-in-depth CASCADE, idempotent', ae.includes('app_events_user_id_fkey') && ae.includes('on delete cascade') && ae.includes('confdeltype'))
@@ -226,6 +227,8 @@ function scenarioRows() {
   }
   walk('src')
   check('service key never referenced in client source', offenders.length === 0, offenders.join(','))
+  const serverSource = readFileSync('server.js', 'utf8')
+  check('production server contains no env-controlled fake-auth path', !serverSource.includes('SC_TEST_FAKE_AUTH'))
 }
 
 const passed = results.filter((r) => r.pass).length

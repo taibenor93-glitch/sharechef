@@ -28,6 +28,8 @@ function makeStorage() {
     getItem: (k) => (store.has(k) ? store.get(k) : null),
     setItem: (k, v) => store.set(k, String(v)),
     removeItem: (k) => store.delete(k),
+    key: (i) => [...store.keys()][i] ?? null,
+    get length() { return store.size },
     _raw: store,
   }
 }
@@ -61,11 +63,13 @@ const failFetch = async () => ({ ok: false, status: 500, json: async () => null 
 const A = '11111111-1111-4111-8111-111111111111'
 const B = '22222222-2222-4222-8222-222222222222'
 
-// 1. purgeAccountLocal removes ONLY the deleted account's queued items
+// 1. Purge retires the entire installation: account-bound, shared-account,
+// and anonymous items carrying the old anon id are all removed.
 {
-  const { events } = await freshModules()
+  const { session, events } = await freshModules()
   events.__test.setEnabled(true)
   await events.__test.init()
+  const retiredAnon = session.getAnonId()
   events.__test.setFetch(failFetch) // everything retriable → lands in the outbox
   events.__test.dispatch(events.__test.buildBody('dish_saved'), makeJwt(A), true, A)
   events.__test.dispatch(events.__test.buildBody('dish_saved'), makeJwt(B), true, B)
@@ -74,42 +78,71 @@ const B = '22222222-2222-4222-8222-222222222222'
   await events.__test.persistChainDone()
   check('setup: three items queued (A, B, anonymous)', events.__test.queueSize() === 3)
   await events.purgeAccountLocal(A)
-  const required = events.__test.queueRequired()
-  check('A\'s account-bound items removed', !required.includes(A))
-  check('B\'s account-bound item survives', required.includes(B))
-  check('anonymous item survives', required.includes(null))
+  check('all queued items for retired installation removed', events.__test.queueSize() === 0)
+  check('analytics remains suspended after privacy purge', events.__test.privacySuspended() === true)
   const stored = JSON.parse(globalThis.window.localStorage.getItem('sc_evt_outbox') ?? '[]')
-  check('persisted outbox reflects the purge', Array.isArray(stored) && stored.length === 2 && !stored.some((i) => i.requiredUserId === A))
+  check('persisted outbox contains no retired anon id', Array.isArray(stored) && !stored.some((i) => i.body?.anon_id === retiredAnon))
 }
 
-// 2. Identity-link guard cleared for the deleted account only
+// 2. Every identity-link guard is cleared because the installation rotates.
 {
-  const { events } = await freshModules()
+  const { session, events } = await freshModules()
   events.__test.setEnabled(true)
   await events.__test.init()
-  globalThis.window.localStorage.setItem(`sc_evt_linked_${A}`, '1')
+  session.getAnonId()
+  globalThis.window.localStorage.setItem(`sc_evt_linked_${A}`, '1') // legacy guard
   globalThis.window.localStorage.setItem(`sc_evt_linked_${B}`, '1')
+  globalThis.window.localStorage.setItem('unrelated', 'keep')
   await events.purgeAccountLocal(A)
-  check('deleted account\'s identity-link guard cleared', globalThis.window.localStorage.getItem(`sc_evt_linked_${A}`) === null)
-  check('other account\'s guard untouched', globalThis.window.localStorage.getItem(`sc_evt_linked_${B}`) === '1')
+  check('legacy identity-link guard cleared', globalThis.window.localStorage.getItem(`sc_evt_linked_${A}`) === null)
+  check('shared-device identity-link guard cleared', globalThis.window.localStorage.getItem(`sc_evt_linked_${B}`) === null)
+  check('unrelated local storage survives', globalThis.window.localStorage.getItem('unrelated') === 'keep')
 }
 
 // 3. Purge works with the kill switch OFF (privacy cleanup is unconditional)
 {
-  const { events } = await freshModules()
+  const { session, events } = await freshModules()
   events.__test.setEnabled(false)
+  await events.__test.init()
+  const retiredAnon = events.__test.buildBody('app_opened').anon_id
+  const otherAnon = crypto.randomUUID()
   // Pre-existing persisted outbox from an earlier enabled run:
-  const item = (uid) => ({
-    body: { id: crypto.randomUUID(), event: 'dish_saved', anon_id: crypto.randomUUID(), session_id: crypto.randomUUID(), app_version: '1.6.0' },
-    needsAuth: true, attempts: 1, requiredUserId: uid,
+  const item = (uid, anonId, needsAuth = true) => ({
+    body: { id: crypto.randomUUID(), event: 'dish_saved', anon_id: anonId, session_id: crypto.randomUUID(), app_version: '1.6.0' },
+    needsAuth, attempts: 1, ...(uid ? { requiredUserId: uid } : {}),
   })
-  globalThis.window.localStorage.setItem('sc_evt_outbox', JSON.stringify([item(A), item(B)]))
+  globalThis.window.localStorage.setItem('sc_evt_outbox', JSON.stringify([
+    item(A, retiredAnon),
+    item(B, retiredAnon),
+    item(null, retiredAnon, false),
+    item(B, otherAnon),
+  ]))
   await events.purgeAccountLocal(A)
   const stored = JSON.parse(globalThis.window.localStorage.getItem('sc_evt_outbox') ?? '[]')
-  check('kill switch OFF: purge still removes the deleted account\'s stored items', stored.length === 1 && stored[0].requiredUserId === B)
+  check('kill switch OFF: only other-install item survives', stored.length === 1 && stored[0].requiredUserId === B && stored[0].body.anon_id === otherAnon)
 }
 
-// 4. resetIdentity rotates anon_id AND session_id, and persists the new anon id
+// 4. Suspension waits for an in-flight delivery and blocks new sends.
+{
+  const { events } = await freshModules()
+  events.__test.setEnabled(true)
+  await events.__test.init()
+  let release
+  events.__test.setFetch(() => new Promise((resolve) => {
+    release = () => resolve({ ok: true, status: 201, json: async () => ({ stored: true }) })
+  }))
+  events.__test.dispatch(events.__test.buildBody('app_opened'), null, false)
+  await sleep(10)
+  let suspendedDone = false
+  const suspension = events.suspendAnalyticsForAccountDeletion().then(() => { suspendedDone = true })
+  await sleep(10)
+  check('suspension waits for in-flight delivery', suspendedDone === false)
+  release()
+  await suspension
+  check('suspension completes after delivery settles', suspendedDone === true && events.__test.privacySuspended() === true)
+}
+
+// 5. resetIdentity rotates anon_id AND session_id, and persists the new anon id
 {
   const { session } = await freshModules()
   await session.initIdentity()
@@ -123,7 +156,7 @@ const B = '22222222-2222-4222-8222-222222222222'
   check('new anon_id persisted to storage', globalThis.window.localStorage.getItem('sc_anon_id') === anonAfter)
 }
 
-// 5. resetIdentity persists via Capacitor Preferences on native (never localStorage)
+// 6. resetIdentity persists via Capacitor Preferences on native (never localStorage)
 {
   const { session } = await freshModules()
   const prefStore = new Map()
@@ -142,7 +175,7 @@ const B = '22222222-2222-4222-8222-222222222222'
   check('native: localStorage never received the anon id', globalThis.window.localStorage._raw.get('sc_anon_id') === undefined)
 }
 
-// 6. Invalid user id is a safe no-op
+// 7. Invalid user id is a safe no-op
 {
   const { events } = await freshModules()
   globalThis.window.localStorage.setItem('sc_evt_outbox', JSON.stringify([{ body: { id: crypto.randomUUID(), event: 'dish_saved', anon_id: crypto.randomUUID(), session_id: crypto.randomUUID(), app_version: '1.6.0' }, needsAuth: true, attempts: 1, requiredUserId: A }]))
