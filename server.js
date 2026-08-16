@@ -63,6 +63,130 @@ app.use('/api/events', (err, _req, res, _next) => {
   res.status(status).json({ error: status === 413 ? 'payload too large' : 'bad request' })
 })
 
+// ── Account deletion (Revision 6) ────────────────────────────────────────────
+// PERMANENT, privacy-first account deletion. Requires a RECENT password
+// sign-in: Supabase sets last_sign_in_at only on a genuine sign-in
+// (signInWithPassword) — a silently refreshed JWT does NOT update it, so a
+// long-lived stolen session can never delete an account without the password.
+// The password itself goes only from the client to Supabase auth; this server
+// never sees, accepts, or logs it.
+// Analytics removal is explicit and privacy-first (reviewer-approved): every
+// app_events row carrying ANY of the user's installation ids is removed — even
+// rows another household member generated on a shared installation. Functional
+// data of other users is never touched (it is keyed by their own user_id).
+// Hard delete only (shouldSoftDelete=false); production CASCADE FKs then remove
+// profiles, recipes, shares, cook_sessions, micheli_memory in one step.
+const REAUTH_WINDOW_MS = 5 * 60 * 1000 // 5 min: narrow, documented reauth window
+const DELETE_MAX_PER_HOUR = 5
+const deleteBuckets = new Map() // ip → { hourStart, count } (per-process, best-effort)
+function deleteRateLimited(key) {
+  const now = Date.now()
+  let b = deleteBuckets.get(key)
+  if (!b || now - b.hourStart > 3600_000) { b = { hourStart: now, count: 0 }; deleteBuckets.set(key, b) }
+  b.count++
+  if (deleteBuckets.size > 5000) deleteBuckets.clear() // memory ceiling
+  return b.count > DELETE_MAX_PER_HOUR
+}
+
+// True only for a genuine, RECENT password sign-in. Refresh-only sessions keep
+// their original last_sign_in_at and therefore fail this check.
+function isRecentSignIn(lastSignInAt, now = Date.now()) {
+  const t = Date.parse(String(lastSignInAt ?? ''))
+  if (!Number.isFinite(t)) return false
+  if (t > now + 60_000) return false // clock skew tolerance; far-future is invalid
+  return now - t <= REAUTH_WINDOW_MS
+}
+
+// Admin client (service-role) — created lazily, server-side only. Independent of
+// the analytics kill switch: deletion must work even with analytics OFF.
+let adminDb = null
+function adminClient() {
+  if (!process.env.SUPABASE_SERVICE_KEY || !process.env.SUPABASE_URL) return null
+  if (!adminDb) {
+    adminDb = createSupabaseClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY, {
+      auth: { persistSession: false },
+    })
+  }
+  return adminDb
+}
+
+// Verified identity for deletion: id + last_sign_in_at from the auth server.
+// SC_TEST_FAKE_AUTH=1 is a TEST-ONLY seam (never set in production): accepts
+// "test:<uuid>:<epochMs>" bearer tokens with zero network. Gated hard on env.
+async function verifyUserForDeletion(token) {
+  if (process.env.SC_TEST_FAKE_AUTH === '1' && typeof token === 'string' && token.startsWith('test:')) {
+    const [, id, ms] = token.split(':')
+    if (UUID_RE.test(String(id))) return { id: String(id), last_sign_in_at: new Date(Number(ms)).toISOString() }
+    return null
+  }
+  if (!supabaseAuth || !token) return null
+  try {
+    const { data, error } = await supabaseAuth.auth.getUser(token)
+    if (error || !data?.user) return null
+    return { id: data.user.id, last_sign_in_at: data.user.last_sign_in_at ?? null }
+  } catch { return null }
+}
+
+// Core deletion, separated for direct testing with a fake db. Idempotent and
+// retry-safe: re-running any step removes nothing new; after a partial failure
+// the retry is safe because analytics disappearing first is the privacy-correct
+// failure mode. Never touches another user's functional data.
+async function performAccountDeletion(db, userId) {
+  // 1) Collect every installation id ever attributed to this user.
+  const { data: rows, error: selErr } = await db.from('app_events').select('anon_id').eq('user_id', userId)
+  if (selErr) return { ok: false, step: 'collect' }
+  const anonIds = [...new Set((rows || []).map((r) => r?.anon_id).filter(Boolean))]
+  // 2) Privacy-first purge: all rows for those installations (over-deletion of a
+  //    shared household member's analytics is approved), then any remaining rows
+  //    carrying the user_id (retry safety net — normally covered by step 2a).
+  if (anonIds.length > 0) {
+    const { error } = await db.from('app_events').delete().in('anon_id', anonIds)
+    if (error) return { ok: false, step: 'analytics-anon' }
+  }
+  const { error: delUserErr } = await db.from('app_events').delete().eq('user_id', userId)
+  if (delUserErr) return { ok: false, step: 'analytics-user' }
+  // 3) HARD delete of the auth user (shouldSoftDelete=false — never soft).
+  //    Production ON DELETE CASCADE removes all functional data atomically.
+  const { error: adminErr } = await db.auth.admin.deleteUser(userId, false)
+  if (adminErr) return { ok: false, step: 'auth' }
+  return { ok: true }
+}
+
+app.post('/api/account/delete', express.json({ limit: '1kb' }), async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization || ''
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null
+    if (!token) return res.status(401).json({ error: 'authentication required' })
+    // Strict validation: NO body fields accepted, ever. The target account comes
+    // ONLY from the verified token — a body-supplied user id is an instant 400.
+    if (req.body && typeof req.body === 'object' && Object.keys(req.body).length > 0) {
+      return res.status(400).json({ error: 'no body fields accepted' })
+    }
+    if (deleteRateLimited(req.ip || 'unknown')) return res.status(429).json({ error: 'rate limited' })
+    const user = await verifyUserForDeletion(token)
+    if (!user) return res.status(401).json({ error: 'invalid token' })
+    if (!isRecentSignIn(user.last_sign_in_at)) {
+      return res.status(403).json({ error: 'recent sign-in required' })
+    }
+    const db = adminClient()
+    if (!db) return res.status(503).json({ error: 'deletion not configured' })
+    const result = await performAccountDeletion(db, user.id)
+    if (!result.ok) {
+      console.error('[account] deletion failed at step:', result.step) // step name only — no ids, no secrets
+      return res.status(503).json({ error: 'deletion failed, retry' })
+    }
+    return res.status(200).json({ deleted: true })
+  } catch (err) {
+    console.error('[account] endpoint error:', err.message)
+    return res.status(500).json({ error: 'internal' })
+  }
+})
+// Body-parser errors on this route → clean JSON status.
+app.use('/api/account/delete', (err, _req, res, _next) => {
+  const status = err?.type === 'entity.too.large' ? 413 : err?.status || 400
+  res.status(status).json({ error: status === 413 ? 'payload too large' : 'bad request' })
+})
+
 app.use(express.json())
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
@@ -983,4 +1107,4 @@ if (!process.env.SC_TEST_NO_LISTEN) {
 }
 
 // Test-only surface (harmless in production; used by tests/ with SC_TEST_NO_LISTEN=1).
-export const __test = { validateEvent, EVENT_NAMES_CLIENT, EVENT_NAMES_SERVER, emitServerEvent }
+export const __test = { validateEvent, EVENT_NAMES_CLIENT, EVENT_NAMES_SERVER, emitServerEvent, performAccountDeletion, isRecentSignIn }

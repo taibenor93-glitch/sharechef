@@ -311,6 +311,23 @@ export function linkIdentityOnce(userId: string, authToken: string | null): void
   } catch { /* ignore */ }
 }
 
+/** Account-deletion local purge: remove every queued analytics item bound to
+ *  the deleted account and clear its identity-link guard. Runs REGARDLESS of
+ *  the kill switch — this is privacy cleanup, not analytics. Anonymous queue
+ *  items are left alone (they belong to the installation, whose identity is
+ *  rotated separately by session.resetIdentity()). */
+export async function purgeAccountLocal(userId: string): Promise<void> {
+  try {
+    const uid = String(userId).toLowerCase()
+    if (!UUID_RE.test(uid)) return
+    await loadOutbox()
+    retryQueue = retryQueue.filter((i) => i.requiredUserId !== uid)
+    persistOutbox()
+    await persistChain // storage settled before the caller signs out
+    try { window.localStorage.removeItem(`sc_evt_linked_${uid}`) } catch { /* ignore */ }
+  } catch { /* cleanup must never throw */ }
+}
+
 // ── Test seams (production-harmless) ─────────────────────────────────────────
 export const __test = {
   init: initIdentity, // same single-flight promise this module's emitters observe
@@ -319,6 +336,7 @@ export const __test = {
   setFetch(f: typeof fetch) { fetchImpl = f },
   queueSize() { return retryQueue.length },
   queueIds() { return retryQueue.map((i) => i.body.id) },
+  queueRequired() { return retryQueue.map((i) => i.requiredUserId ?? null) },
   clearQueue() { retryQueue.length = 0 },
   flush: flushRetryQueue,
   loadOutbox,
