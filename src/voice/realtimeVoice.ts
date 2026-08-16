@@ -3,6 +3,12 @@
 // current `gpt-realtime` model. Audio is PCM16 @ 24kHz both ways.
 
 import { WS_BASE } from '../lib/apiBase'
+import { getAnonId, getSessionId, initIdentity } from '../lib/session'
+import { APP_VERSION, voiceActivity } from '../lib/events'
+
+// Phase 1 events: identity + app version ride the auth frame ONLY when
+// analytics is enabled, so a disabled build sends no persistent identifier.
+const EVENTS_ON = import.meta.env.VITE_EVENTS_ENABLED === 'true'
 
 export type VoiceStatus = 'idle' | 'connecting' | 'ready' | 'listening' | 'processing' | 'speaking'
 
@@ -137,6 +143,9 @@ export class RealtimeVoice {
       // every (re)connect so it can never be stale.
       const token = this.getToken ? await this.getToken() : null
       const language = this.getLanguage ? this.getLanguage() : null
+      // Analytics identity must be settled BEFORE any identifier leaves the
+      // device — voice and app events from one launch share the same ids.
+      if (EVENTS_ON) { try { await initIdentity() } catch { /* identity optional */ } }
       const isReconnectAttempt = this.reconnectAttempts > 0
       // Only tell the server "treat this as a real interrupted cook" once a
       // conversation had actually started — otherwise a blip during the very
@@ -147,7 +156,11 @@ export class RealtimeVoice {
       // Never read from a bundled env var — that would ship it to every visitor.
       let testToken: string | null = null
       try { testToken = window.localStorage.getItem('sc_voice_test_token') } catch { /* ignore */ }
-      this.wsSend({ type: 'auth', token, language, guestId: this.guestId, isReconnect, testToken })
+      this.wsSend({
+        type: 'auth', token, language, guestId: this.guestId, isReconnect, testToken,
+        ...(EVENTS_ON ? { anonId: getAnonId(), sessionId: getSessionId(), appVersion: APP_VERSION } : {}),
+      })
+      if (EVENTS_ON) voiceActivity() // session stays alive while cooking starts
       this.reconnectAttempts = 0
       this.cb.onStatus('ready')
       if (isReconnectAttempt) {
@@ -188,6 +201,7 @@ export class RealtimeVoice {
 
   disconnect(): void {
     this.intentionalEnd = true
+    voiceActivity() // deliberate end is the last activity marker of the session
     this.releaseWakeLock()
     if (this.reconnectTimer !== null) {
       clearTimeout(this.reconnectTimer)
@@ -324,6 +338,7 @@ export class RealtimeVoice {
         this.cb.onStatus('processing')
         break
       case 'response.done': {
+        voiceActivity() // completed turn: low-frequency lifecycle point, not the audio loop
         const remaining = this.playbackCtx
           ? Math.max(0, (this.nextPlayTime - this.playbackCtx.currentTime) * 1000) + 150
           : 150

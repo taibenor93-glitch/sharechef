@@ -1,4 +1,5 @@
 import { supabase } from './supabaseClient'
+import { track } from './events'
 
 export type ShareChannel = 'native' | 'whatsapp' | 'x' | 'facebook' | 'copy' | 'linkedin' | 'instagram' | 'tiktok'
 
@@ -16,6 +17,10 @@ export async function recordShare(
       recipe_id: recipeId ?? null,
       channel,
     })
+    if (!error) {
+      const { data: s } = await supabase.auth.getSession()
+      track('dish_shared', { channel }, s.session?.access_token ?? null)
+    }
     return !error
   } catch {
     return false

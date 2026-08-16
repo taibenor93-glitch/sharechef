@@ -1,5 +1,8 @@
+import { useEffect } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { useAuth } from './hooks/useAuth'
+import { startAnalyticsSession, foregroundBoundary, linkIdentityOnce, setAuthContextProvider } from './lib/events'
+import { supabase } from './lib/supabaseClient'
 import { Layout } from './components/Layout'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import { LoginPage } from './pages/Login'
@@ -15,6 +18,27 @@ import { PricingPage } from './pages/Pricing'
 
 export default function App() {
   const { authed, session, loading } = useAuth()
+
+  // Phase 1 events (no-ops unless VITE_EVENTS_ENABLED='true'): cold launch
+  // always starts a new session; foreground return rotates only after the
+  // 30-minute inactivity window; plus one-time anon→account linkage.
+  useEffect(() => {
+    // Fresh AUTH CONTEXT (token + user id) for authenticated retries, fetched
+    // at flush time and never persisted — retries deliver only under the exact
+    // account that performed the action.
+    setAuthContextProvider(async () => {
+      const { data } = await supabase.auth.getSession()
+      const s = data.session
+      return s?.access_token && s.user?.id ? { accessToken: s.access_token, userId: s.user.id } : null
+    })
+    startAnalyticsSession()
+    const onVisible = () => { if (document.visibilityState === 'visible') foregroundBoundary() }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [])
+  useEffect(() => {
+    if (session?.user?.id) linkIdentityOnce(session.user.id, session.access_token ?? null)
+  }, [session])
 
   if (loading) {
     return (

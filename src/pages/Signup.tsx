@@ -3,6 +3,7 @@ import type { FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { stashPendingProfile } from '../hooks/useAuth'
+import { track } from '../lib/events'
 
 export function SignupPage() {
   const nav = useNavigate()
@@ -33,6 +34,7 @@ export function SignupPage() {
     const { data, error } = await supabase.auth.signUp({ email, password })
     setBusy(false)
     if (error) return setError(error.message)
+    track('account_created', undefined, data.session?.access_token ?? null)
     if (data.session) {
       nav('/', { replace: true })
     } else {

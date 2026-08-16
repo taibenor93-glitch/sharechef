@@ -18,6 +18,51 @@ const server = createServer(app)
 const PORT = process.env.PORT || 3000
 
 app.use(cors())
+
+// ── Phase 1 funnel events endpoint ───────────────────────────────────────────
+// Registered BEFORE the global body parser so its own 2 KB limit is the real
+// boundary: express.json({limit}) rejects oversized bodies — fixed-length AND
+// chunked — during parsing, before any event processing runs.
+app.post('/api/events', express.json({ limit: '2kb' }), async (req, res) => {
+  try {
+    if (!EVENTS_ENABLED) return res.status(202).json({ stored: false, reason: 'disabled' })
+
+    // Authenticated user id comes exclusively from a verified JWT. A supplied
+    // but invalid token is a hard 401 — never silently downgraded to anonymous.
+    const authHeader = req.headers.authorization || ''
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null
+    let verifiedUserId = null
+    if (token) {
+      const u = await verifyUser(token)
+      if (!u) return res.status(401).json({ error: 'invalid token' })
+      verifiedUserId = u.id
+    }
+    // identity_linked is meaningless without a verified account.
+    if (req.body?.event === 'identity_linked' && !verifiedUserId) {
+      return res.status(401).json({ error: 'identity_linked requires a verified token' })
+    }
+
+    const checked = validateEvent(req.body, verifiedUserId, EVENT_NAMES_CLIENT)
+    if (checked.error) return res.status(400).json({ error: checked.error })
+
+    const rlKey = checked.row.anon_id || req.ip || 'unknown'
+    if (rateLimited(rlKey)) return res.status(429).json({ error: 'rate limited' })
+
+    const result = await recordEvent(checked.row)
+    if (result.reason === 'not-configured') return res.status(503).json({ error: 'events not configured' })
+    if (result.reason === 'error') return res.status(503).json({ error: 'storage error, retry' }) // honest retriable signal
+    return res.status(result.stored ? 201 : 202).json(result)
+  } catch (err) {
+    console.error('[events] endpoint error:', err.message)
+    return res.status(500).json({ error: 'internal' })
+  }
+})
+// Body-parser errors on this route (oversize, malformed JSON) → clean JSON status.
+app.use('/api/events', (err, _req, res, _next) => {
+  const status = err?.type === 'entity.too.large' ? 413 : err?.status || 400
+  res.status(status).json({ error: status === 413 ? 'payload too large' : 'bad request' })
+})
+
 app.use(express.json())
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
@@ -29,6 +74,150 @@ const REALTIME_VOICE = 'shimmer'
 const REALTIME_MODEL_TEST = 'gpt-realtime-2.1-mini'
 function realtimeUrlFor(model) {
   return `wss://api.openai.com/v1/realtime?model=${model}`
+}
+
+// ── Phase 1 funnel events ────────────────────────────────────────────────────
+// KILL SWITCH: EVENTS_ENABLED must be exactly 'true' (default OFF).
+// Inserts use the service-role key (SUPABASE_SERVICE_KEY) so the table needs no
+// RLS policies — clients have zero direct access. Server-generated events call
+// recordEvent() directly (no HTTP loopback). All validation is REJECT-based:
+// unknown properties fail the whole request, nothing is silently dropped.
+const EVENTS_ENABLED = process.env.EVENTS_ENABLED === 'true'
+const EVENT_NAMES_CLIENT = new Set([
+  'app_opened', 'account_created', 'identity_linked',
+  'ingredients_submitted', 'dish_proposed', 'dish_saved', 'dish_shared',
+])
+const EVENT_NAMES_SERVER = new Set([
+  'micheli_intro_triggered', // intro instruction issued — NOT verified audio completion
+  'voice_session_started', 'voice_session_ended',
+  'voice_session_disconnected', 'voice_session_resumed',
+])
+const EVENT_PROPS = { // event → allowed optional typed props beyond the standard set
+  app_opened: {}, account_created: {}, identity_linked: {},
+  ingredients_submitted: { ingredient_count: 'int' },
+  dish_proposed: { ingredient_count: 'int' },
+  dish_saved: {}, dish_shared: { channel: 'channel' },
+  micheli_intro_triggered: {},
+  voice_session_started: {},
+  voice_session_ended: { turn_count: 'int', duration_seconds: 'int' },
+  voice_session_disconnected: { turn_count: 'int', duration_seconds: 'int', close_code: 'int' },
+  voice_session_resumed: {},
+}
+const INT_BOUNDS = { ingredient_count: 99, turn_count: 999, duration_seconds: 86400, close_code: 4999 }
+const CHANNELS = new Set(['native', 'whatsapp', 'x', 'facebook', 'copy', 'linkedin', 'instagram', 'tiktok'])
+const STANDARD_KEYS = new Set(['id', 'event', 'anon_id', 'session_id', 'app_version', 'reported_client_ts'])
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const seenEventIds = new Set() // best-effort in-memory dedupe; DB unique index is authoritative
+
+let eventsDb = null
+function eventsClient() {
+  if (!EVENTS_ENABLED || !process.env.SUPABASE_SERVICE_KEY || !process.env.SUPABASE_URL) return null
+  if (!eventsDb) {
+    eventsDb = createSupabaseClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY, {
+      auth: { persistSession: false },
+    })
+  }
+  return eventsDb
+}
+
+// Best-effort rate limiting (documented: per-process, resets on restart, not a
+// guaranteed global limit across replicas). anon_id-keyed with an IP fallback.
+const rateBuckets = new Map() // key → { minStart, minCount, dayStart, dayCount }
+function rateLimited(key) {
+  const now = Date.now()
+  let b = rateBuckets.get(key)
+  if (!b) { b = { minStart: now, minCount: 0, dayStart: now, dayCount: 0 }; rateBuckets.set(key, b) }
+  if (now - b.minStart > 60_000) { b.minStart = now; b.minCount = 0 }
+  if (now - b.dayStart > 86_400_000) { b.dayStart = now; b.dayCount = 0 }
+  b.minCount++; b.dayCount++
+  if (rateBuckets.size > 5000) rateBuckets.clear() // memory ceiling
+  return b.minCount > 60 || b.dayCount > 1000
+}
+
+// Validates one event object. Returns { error } or { row } ready for insert.
+// verifiedUserId comes ONLY from a server-verified JWT — never from the body.
+function validateEvent(raw, verifiedUserId, allowedNames) {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return { error: 'body must be an object' }
+  const allowedProps = EVENT_PROPS[raw.event]
+  if (typeof raw.event !== 'string' || !allowedNames.has(raw.event) || !allowedProps) return { error: 'unknown event' }
+  for (const key of Object.keys(raw)) {
+    if (!STANDARD_KEYS.has(key) && !(key in allowedProps)) return { error: `unknown property: ${key}` } // REJECT, never drop
+  }
+  if (typeof raw.id !== 'string' || !UUID_RE.test(raw.id)) return { error: 'id must be a uuid' }
+  if (typeof raw.anon_id !== 'string' || !UUID_RE.test(raw.anon_id)) return { error: 'anon_id must be a uuid' }
+  if (typeof raw.session_id !== 'string' || !UUID_RE.test(raw.session_id)) return { error: 'session_id must be a uuid' }
+  // Strict x.y.z, REQUIRED ('0.0.0' is the explicit unknown-version classification).
+  if (typeof raw.app_version !== 'string' || !/^\d{1,3}\.\d{1,3}\.\d{1,4}$/.test(raw.app_version)) return { error: 'bad app_version' }
+  let clientTs = null
+  if (raw.reported_client_ts !== undefined) {
+    if (typeof raw.reported_client_ts !== 'string' || isNaN(Date.parse(raw.reported_client_ts))) return { error: 'bad reported_client_ts' }
+    clientTs = new Date(raw.reported_client_ts).toISOString()
+  }
+  const row = {
+    id: raw.id.toLowerCase(),
+    event: raw.event,
+    anon_id: raw.anon_id.toLowerCase(),
+    user_id: verifiedUserId || null,
+    session_id: raw.session_id.toLowerCase(),
+    app_version: raw.app_version,
+    reported_client_ts: clientTs,
+    // occurred_at: DB default now() — server-authoritative, never client-supplied
+  }
+  for (const [key, kind] of Object.entries(allowedProps)) {
+    const v = raw[key]
+    if (v === undefined) continue
+    if (kind === 'int') {
+      if (!Number.isInteger(v) || v < 0 || v > INT_BOUNDS[key]) return { error: `bad ${key}` }
+      row[key] = v
+    } else if (kind === 'channel') {
+      if (!CHANNELS.has(v)) return { error: 'bad channel' }
+      row.channel = v
+    }
+  }
+  return { row }
+}
+
+// Shared internal event service: both the HTTP endpoint and server-side emits
+// land here. Never makes HTTP calls back to our own endpoint.
+async function recordEvent(row) {
+  if (!EVENTS_ENABLED) return { stored: false, reason: 'disabled' }
+  if (seenEventIds.has(row.id)) return { stored: false, reason: 'duplicate' }
+  const db = eventsClient()
+  if (!db) return { stored: false, reason: 'not-configured' }
+  const { error } = await db.from('app_events').insert(row)
+  if (error) {
+    // Transient failures must stay retryable: the id enters the dedupe set ONLY
+    // on success or on a confirmed database duplicate. The DB primary key is
+    // always the deduplication authority.
+    if (String(error.code) === '23505') {
+      seenEventIds.add(row.id)
+      return { stored: false, reason: 'duplicate' }
+    }
+    console.error('[events] insert failed:', error.message)
+    return { stored: false, reason: 'error' }
+  }
+  seenEventIds.add(row.id)
+  if (seenEventIds.size > 10000) seenEventIds.clear()
+  return { stored: true }
+}
+
+// Server-emitted events (voice lifecycle, intro). Fire-and-forget by callers.
+// Identity must be valid UUIDs from a 1.6+ client's auth frame; appVersion is
+// the client-reported build version ('0.0' = explicit "instrumented client with
+// missing/invalid version" classification — never silently invented).
+function emitServerEvent(event, anonId, sessionId, userId, appVersion, props = {}) {
+  if (!EVENTS_ENABLED) return
+  if (!UUID_RE.test(String(anonId)) || !UUID_RE.test(String(sessionId))) return // no valid identity → no event
+  const raw = {
+    id: (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : null,
+    event, anon_id: anonId, session_id: sessionId,
+    app_version: /^\d{1,3}\.\d{1,3}\.\d{1,4}$/.test(String(appVersion)) ? appVersion : '0.0.0',
+    ...props,
+  }
+  if (!raw.id) return
+  const checked = validateEvent(raw, userId, EVENT_NAMES_SERVER)
+  if (checked.error) { console.error('[events] server emit invalid:', event, checked.error); return }
+  void recordEvent(checked.row)
 }
 
 const MICHELI_PROMPT = `You are Micheli, the warm, accomplished voice of ShareChef AI — a personal cooking companion. You are a woman in your forties with the easy confidence of a seasoned chef and the warmth of someone who genuinely loves feeding people. Your American voice is soft, friendly, and quietly inspiring. You make people feel capable, never judged.
@@ -504,6 +693,15 @@ wss.on('connection', (browserWs, req) => {
   let sessionLanguage = null // set once decided, so a later flush can persist it
   let activeModel = REALTIME_MODEL // overridden to REALTIME_MODEL_TEST only by a verified VOICE_TEST_TOKEN match
   let isTestSession = false
+  // Phase 1 events: identity comes from the auth frame of 1.6+ clients; older
+  // clients send none and produce no events. Turns count only non-empty,
+  // completed chef responses (incremented where the transcript is captured).
+  let evtAnonId = null
+  let evtSessionId = null
+  let evtAppVersion = null
+  let evtVoiceStartMs = null
+  let evtTurnCount = 0
+  const evtDuration = () => (evtVoiceStartMs ? Math.min(86400, Math.max(0, Math.round((Date.now() - evtVoiceStartMs) / 1000))) : 0)
   const headerLanguage = languageFromHeader(req)
   const pending = []
 
@@ -582,7 +780,17 @@ wss.on('connection', (browserWs, req) => {
     }
     pending.length = 0
     // From the next session on, this user gets "Welcome back" instead of the intro.
+    // Phase 1 events: intro instruction issued for a first-time authed user.
+    // Named micheli_intro_TRIGGERED deliberately — the server cannot verify the
+    // audio finished playing, so no completion is claimed (guest limitation:
+    // guests have no profile row and produce no intro event).
+    if (profile && !profile.has_met_micheli) {
+      emitServerEvent('micheli_intro_triggered', evtAnonId, evtSessionId, user ? user.id : null, evtAppVersion)
+    }
     markMet(authToken, profile)
+    evtVoiceStartMs = Date.now()
+    evtTurnCount = 0
+    emitServerEvent(isReconnect ? 'voice_session_resumed' : 'voice_session_started', evtAnonId, evtSessionId, user ? user.id : null, evtAppVersion)
 
     // ── OpenAI-leg keep-alive (ping only, never terminate) ───────────────────
     // Generate periodic traffic so idle proxies don't drop the upstream socket.
@@ -615,6 +823,9 @@ wss.on('connection', (browserWs, req) => {
             line = { who: 'user', text: String(msg.transcript).slice(0, 500) }
           }
           if (line && line.text.trim()) {
+            // Phase 1 events: a chef turn counts ONLY here — a completed response
+            // with a non-empty transcript. Empty/canceled/malformed responses never land.
+            if (line.who === 'chef') evtTurnCount++
             transcript.push(line)
             if (transcript.length > 40) transcript.splice(0, transcript.length - 40)
             if (++linesSinceFlush >= 4) flushCookState()
@@ -675,6 +886,10 @@ wss.on('connection', (browserWs, req) => {
           clientLanguage = parsed.language.trim()
         }
         isReconnect = parsed.isReconnect === true
+        // Phase 1 events identity (1.6+ clients only; UUIDs re-validated on emit).
+        if (typeof parsed.anonId === 'string') evtAnonId = parsed.anonId
+        if (typeof parsed.sessionId === 'string') evtSessionId = parsed.sessionId
+        if (typeof parsed.appVersion === 'string') evtAppVersion = parsed.appVersion
         const voiceTestToken = process.env.VOICE_TEST_TOKEN
         if (voiceTestToken && typeof parsed.testToken === 'string' && parsed.testToken === voiceTestToken) {
           activeModel = REALTIME_MODEL_TEST
@@ -729,6 +944,19 @@ wss.on('connection', (browserWs, req) => {
 
   browserWs.on('close', (code) => {
     console.log(`[WS] Browser disconnected: ${code}`)
+    // Phase 1 events: deliberate goodbye vs disconnect. The raw numeric close
+    // code is stored as-is — no interpretation, no invented reasons.
+    if (evtVoiceStartMs) {
+      const props = { turn_count: Math.min(999, evtTurnCount), duration_seconds: evtDuration() }
+      if (intentionalEnd) {
+        emitServerEvent('voice_session_ended', evtAnonId, evtSessionId, user ? user.id : null, evtAppVersion, props)
+      } else {
+        // Raw code stored ONLY when the socket supplied a valid one; never invented.
+        if (Number.isInteger(code) && code >= 0 && code <= 4999) props.close_code = code
+        emitServerEvent('voice_session_disconnected', evtAnonId, evtSessionId, user ? user.id : null, evtAppVersion, props)
+      }
+      evtVoiceStartMs = null
+    }
     clearTimeout(authTimer)
     clearInterval(browserHeartbeat)
     if (!intentionalEnd) {
@@ -746,8 +974,13 @@ wss.on('connection', (browserWs, req) => {
 app.use(express.static(join(__dirname, 'dist')))
 app.get('*', (_req, res) => res.sendFile(join(__dirname, 'dist', 'index.html')))
 
-server.listen(PORT, () => {
-  console.log(`\n  ShareChef AI  →  http://localhost:${PORT}`)
-  console.log(`  Realtime WS   →  /ws/realtime  (${REALTIME_MODEL}, ${REALTIME_VOICE})`)
-  console.log(`  API key       →  ${process.env.OPENAI_API_KEY ? '✓ configured' : '✗ MISSING'}\n`)
-})
+if (!process.env.SC_TEST_NO_LISTEN) {
+  server.listen(PORT, () => {
+    console.log(`\n  ShareChef AI  →  http://localhost:${PORT}`)
+    console.log(`  Realtime WS   →  /ws/realtime  (${REALTIME_MODEL}, ${REALTIME_VOICE})`)
+    console.log(`  API key       →  ${process.env.OPENAI_API_KEY ? '✓ configured' : '✗ MISSING'}\n`)
+  })
+}
+
+// Test-only surface (harmless in production; used by tests/ with SC_TEST_NO_LISTEN=1).
+export const __test = { validateEvent, EVENT_NAMES_CLIENT, EVENT_NAMES_SERVER, emitServerEvent }

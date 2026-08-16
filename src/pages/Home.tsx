@@ -9,6 +9,7 @@ import { generateRecipe } from '../lib/recipeApi'
 import type { GeneratedRecipe } from '../lib/recipeApi'
 import { getStarProgress } from '../lib/stars'
 import { LANGUAGES, initialLanguage, saveLanguage, savedLanguage } from '../lib/language'
+import { track } from '../lib/events'
 
 type Line = { role: 'user' | 'chef'; text: string }
 
@@ -165,6 +166,10 @@ export function HomePage() {
       setGenError(error.message)
       setSaveState('idle')
       return
+    }
+    {
+      const { data } = await supabase.auth.getSession()
+      track('dish_saved', undefined, data.session?.access_token ?? null)
     }
     setSaveState('saved')
     loadCount()
