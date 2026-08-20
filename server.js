@@ -906,7 +906,14 @@ wss.on('connection', (browserWs, req) => {
             },
             // Same fix: strip room noise before voice detection sees it.
             noise_reduction: { type: 'near_field' },
-            transcription: { model: 'gpt-4o-transcribe' },
+            // Language hint re-enabled 2026-08-20: without it, accented English
+            // was transcribed phonetically in Hebrew letters on screen. Held
+            // back 08-04 over an unconfirmed 1.4-build audio-breakup suspicion;
+            // 1.5 is live now. Rollback: remove the `language` field.
+            transcription: {
+              model: 'gpt-4o-transcribe',
+              language: CODE_BY_LANGUAGE[sessionLanguage] || 'en',
+            },
           },
           output: {
             format: { type: 'audio/pcm', rate: 24000 },
