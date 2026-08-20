@@ -895,12 +895,17 @@ wss.on('connection', (browserWs, req) => {
             format: { type: 'audio/pcm', rate: 24000 },
             turn_detection: {
               type: 'server_vad',
-              threshold: 0.6,
+              // 0.6 -> 0.7 (2026-08-18): quiet-mic hiss was triggering the VAD,
+              // feeding near-silence to the transcriber, which hallucinated
+              // phantom phrases ("Hello world"/Arabic) that Micheli answered.
+              threshold: 0.7,
               prefix_padding_ms: 300,
               silence_duration_ms: 1500,
               create_response: true,
               interrupt_response: true,
             },
+            // Same fix: strip room noise before voice detection sees it.
+            noise_reduction: { type: 'near_field' },
             transcription: { model: 'gpt-4o-transcribe' },
           },
           output: {

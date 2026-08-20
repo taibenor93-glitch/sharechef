@@ -171,6 +171,28 @@ export async function kvSet(key, value) {
     }
     return lsSet(key, value);
 }
+/** Account-deletion reset: forget this installation's identity entirely.
+ *  The old anon_id is server-linked to the deleted account, so it must never
+ *  reappear — a fresh anon_id AND session_id are generated and persisted
+ *  (Capacitor Preferences on native, localStorage on web). Runs regardless of
+ *  the analytics kill switch: this is privacy cleanup, not analytics. */
+export async function resetIdentity() {
+    const fresh = makeUuid();
+    memAnonId = fresh;
+    if (await detectNative()) {
+        try {
+            const p = await nativePrefs();
+            await p.set({ key: ANON_KEY, value: fresh });
+        }
+        catch {
+            lsSet(ANON_KEY, fresh);
+        }
+    }
+    else {
+        lsSet(ANON_KEY, fresh);
+    }
+    rotateSession(Date.now());
+}
 /** Foreground-return boundary: keeps the session before 30 idle minutes,
  *  rotates after, and rotates on clock reversal beyond tolerance.
  *  Returns true when a new session began. */

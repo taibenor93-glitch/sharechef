@@ -12,6 +12,7 @@ export function ResetPasswordPage() {
   const [mode, setMode] = useState<'request' | 'update'>('request')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -46,6 +47,7 @@ export function ResetPasswordPage() {
   const updatePassword = async (e: FormEvent) => {
     e.preventDefault()
     if (password.length < 6) return setError('Password must be at least 6 characters.')
+    if (password !== confirmPassword) return setError('Passwords do not match. Please retype them.')
     setBusy(true)
     setError(null)
     setNotice(null)
@@ -81,6 +83,18 @@ export function ResetPasswordPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="At least 6 characters"
+                autoComplete="new-password"
+                minLength={6}
+                required
+              />
+            </div>
+            <div className="field">
+              <label className="label">Confirm new password</label>
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="Type it again"
                 autoComplete="new-password"
                 minLength={6}
                 required

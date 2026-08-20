@@ -1,11 +1,11 @@
-// Phase 1 funnel events — client emitter (revision 3).
+// Phase 1 funnel events — client emitter (revision 5: account-bound persistent outbox).
 // KILL SWITCH: VITE_EVENTS_ENABLED must be exactly 'true' or nothing is sent OR
 // queued. Fire-and-forget; never throws; never blocks UI or the audio path.
 // App version comes from build metadata (__APP_VERSION__ = package.json version).
 //
 // Delivery semantics: a server "duplicate" response means the event already
 // exists — that IS successful delivery. Transient failures (network, 429, 5xx)
-// go to a bounded in-memory retry queue (max 50, max 5 attempts each, original
+// go to a bounded PERSISTENT outbox (max 50, max 5 attempts each, original
 // event UUID preserved so retries can never double-count). Validation/auth 4xx
 // are never retried. The queue flushes on app start and on foreground return.
 import { API_BASE } from './apiBase.js';
@@ -36,6 +36,8 @@ const MAX_ATTEMPTS = 5;
 let retryQueue = [];
 let outboxLoaded = false;
 let flushing = false;
+let privacySuspended = false;
+const inFlightDeliveries = new Set();
 // Serialized persistence: concurrent writers append to this chain so no write
 // overwrites another within this context (cross-tab remains last-writer-wins,
 // documented as best-effort like the rest of web storage).
@@ -136,35 +138,42 @@ function persistOutbox() {
 // flushed with the settled identity — identifiers never leave pre-init.
 const preInitQueue = [];
 let fetchImpl = (...args) => fetch(...args);
-async function sendOnce(body, authToken) {
-    try {
-        const res = await fetchImpl(`${API_BASE}/api/events`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
-            },
-            body: JSON.stringify(body),
-            keepalive: true,
-        });
-        if (res.status === 429 || res.status >= 500)
-            return 'retriable';
-        if (!res.ok)
-            return 'rejected'; // validation/auth 4xx: never retried
-        const json = await res.json().catch(() => null);
-        if (json?.stored === true)
-            return 'delivered';
-        if (json?.reason === 'duplicate')
-            return 'delivered'; // already in the database
-        return 'rejected'; // e.g. kill switch off server-side: no retry loop
-    }
-    catch {
-        return 'retriable'; // network failure
-    }
+function sendOnce(body, authToken) {
+    if (privacySuspended)
+        return Promise.resolve('rejected');
+    const delivery = (async () => {
+        try {
+            const res = await fetchImpl(`${API_BASE}/api/events`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+                },
+                body: JSON.stringify(body),
+                keepalive: true,
+            });
+            if (res.status === 429 || res.status >= 500)
+                return 'retriable';
+            if (!res.ok)
+                return 'rejected'; // validation/auth 4xx: never retried
+            const json = await res.json().catch(() => null);
+            if (json?.stored === true)
+                return 'delivered';
+            if (json?.reason === 'duplicate')
+                return 'delivered'; // already in the database
+            return 'rejected'; // e.g. kill switch off server-side: no retry loop
+        }
+        catch {
+            return 'retriable'; // network failure
+        }
+    })();
+    inFlightDeliveries.add(delivery);
+    void delivery.finally(() => inFlightDeliveries.delete(delivery));
+    return delivery;
 }
 function enqueueRetry(item) {
-    if (!ENABLED)
-        return; // kill switch OFF: no new entries (existing storage untouched)
+    if (!ENABLED || privacySuspended)
+        return; // deletion suspension never creates new entries
     if (retryQueue.length >= MAX_QUEUE)
         return; // bounded: drop, never grow
     retryQueue.push(item);
@@ -179,8 +188,8 @@ function setGuard(guardKey) {
     catch { /* ignore */ }
 }
 async function flushRetryQueue() {
-    if (!ENABLED || flushing)
-        return; // kill switch OFF: never flushes, queue left as-is
+    if (!ENABLED || flushing || privacySuspended)
+        return; // deletion suspension never flushes
     flushing = true;
     try {
         await loadOutbox();
@@ -251,7 +260,7 @@ function buildBody(event, props) {
 }
 export function track(event, props, authToken) {
     try {
-        if (!ENABLED) {
+        if (!ENABLED || privacySuspended) {
             if (DEBUG)
                 console.log('[events:off]', event, props);
             return;
@@ -310,7 +319,7 @@ export function voiceActivity() {
  *  "duplicate" IS confirmation. DB unique (anon,user) index backs it all. */
 export function linkIdentityOnce(userId, authToken) {
     try {
-        if (!ENABLED || !userId || !authToken)
+        if (!ENABLED || privacySuspended || !userId || !authToken)
             return;
         const guard = `sc_evt_linked_${userId.toLowerCase()}`;
         let already = null;
@@ -334,6 +343,46 @@ export function linkIdentityOnce(userId, authToken) {
     }
     catch { /* ignore */ }
 }
+/** Pause analytics before the destructive server request. Waiting for current
+ * deliveries prevents an old-install event from landing after the server-side
+ * privacy purge. No new delivery or retry may start while suspended. */
+export async function suspendAnalyticsForAccountDeletion() {
+    privacySuspended = true;
+    await Promise.allSettled([...inFlightDeliveries]);
+}
+/** Resume only after a definite server rejection that left the account intact. */
+export function resumeAnalyticsAfterFailedDeletion() { privacySuspended = false; }
+/** Account-deletion local purge: remove every queued item for the deleted
+ * account OR the installation being retired, including anonymous/shared-device
+ * items. Also clear pending pre-init emissions and all legacy/current identity
+ * guards so a newly rotated installation can link accounts correctly. */
+export async function purgeAccountLocal(userId) {
+    try {
+        const uid = String(userId).toLowerCase();
+        if (!UUID_RE.test(uid))
+            return;
+        await suspendAnalyticsForAccountDeletion();
+        const retiredAnonId = getAnonId().toLowerCase();
+        await loadOutbox();
+        retryQueue = retryQueue.filter((i) => i.requiredUserId !== uid && String(i.body.anon_id).toLowerCase() !== retiredAnonId);
+        preInitQueue.length = 0;
+        persistOutbox();
+        await persistChain; // storage settled before the caller signs out
+        try {
+            // Guards were historically keyed only by user id. Current guards include
+            // anon id. Clear both forms (and every other install-link guard) because
+            // this installation identity is being retired.
+            for (let i = window.localStorage.length - 1; i >= 0; i--) {
+                const key = window.localStorage.key(i);
+                if (key?.startsWith('sc_evt_linked_'))
+                    window.localStorage.removeItem(key);
+            }
+            window.localStorage.removeItem(`sc_evt_linked_${uid}`);
+        }
+        catch { /* ignore */ }
+    }
+    catch { /* cleanup must never throw */ }
+}
 // ── Test seams (production-harmless) ─────────────────────────────────────────
 export const __test = {
     init: initIdentity, // same single-flight promise this module's emitters observe
@@ -342,6 +391,8 @@ export const __test = {
     setFetch(f) { fetchImpl = f; },
     queueSize() { return retryQueue.length; },
     queueIds() { return retryQueue.map((i) => i.body.id); },
+    queueRequired() { return retryQueue.map((i) => i.requiredUserId ?? null); },
+    privacySuspended() { return privacySuspended; },
     clearQueue() { retryQueue.length = 0; },
     flush: flushRetryQueue,
     loadOutbox,

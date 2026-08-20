@@ -9,6 +9,7 @@ export function SignupPage() {
   const nav = useNavigate()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -21,9 +22,12 @@ export function SignupPage() {
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault()
-    setBusy(true)
     setError(null)
     setNotice(null)
+    if (password !== confirmPassword) {
+      return setError('Passwords do not match. Please retype them.')
+    }
+    setBusy(true)
 
     const allergies = allergiesDraft
       .split(',')
@@ -71,6 +75,18 @@ export function SignupPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="At least 6 characters"
+              autoComplete="new-password"
+              minLength={6}
+              required
+            />
+          </div>
+          <div className="field">
+            <label className="label">Confirm password</label>
+            <input
+              type="password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              placeholder="Type it again"
               autoComplete="new-password"
               minLength={6}
               required
