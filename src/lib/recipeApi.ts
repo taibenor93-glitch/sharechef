@@ -10,6 +10,7 @@ export interface GeneratedRecipe {
   servings: number | null
   tags: string[]
   tip: string
+  nutrition: string
 }
 
 export async function generateRecipe(
@@ -41,6 +42,7 @@ export async function generateRecipe(
     servings: data.servings ?? null,
     tags: Array.isArray(data.tags) ? data.tags : [],
     tip: data.tip ?? '',
+    nutrition: data.nutrition ?? '',
   }
   // Phase 1 events: a dish counts as proposed only after the response parsed
   // AND carries real dish data — a failed parse or empty dish never emits.

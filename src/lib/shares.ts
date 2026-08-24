@@ -1,7 +1,7 @@
 import { supabase } from './supabaseClient'
 import { track } from './events'
 
-export type ShareChannel = 'native' | 'whatsapp' | 'x' | 'facebook' | 'copy' | 'linkedin' | 'instagram' | 'tiktok'
+export type ShareChannel = 'native' | 'whatsapp' | 'x' | 'facebook' | 'copy' | 'linkedin' | 'instagram' | 'tiktok' | 'youtube'
 
 // Record a share for the signed-in user. Guests earn nothing (returns false).
 export async function recordShare(

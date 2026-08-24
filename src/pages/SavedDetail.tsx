@@ -41,8 +41,23 @@ export function SavedDetailPage() {
   const shareText = recipe
     ? `${recipe.title} — a dish I made with Micheli on ShareChef AI 🍳👨‍🍳`
     : 'Cook with Micheli on ShareChef AI 🍳'
+  // Share the actual recipe, not just a link — sharing creations is what ShareChef means.
+  const fullRecipeText = recipe
+    ? [
+        `${recipe.title} 🍳`,
+        recipe.description || '',
+        '',
+        'Ingredients:',
+        ...(Array.isArray(recipe.ingredients) ? recipe.ingredients.map((i) => `• ${i}`) : []),
+        '',
+        'Steps:',
+        ...(Array.isArray(recipe.steps) ? recipe.steps.map((s, i) => `${i + 1}. ${s}`) : []),
+        '',
+        `Made with Micheli, my AI chef on ShareChef AI 👨‍🍳 ${APP_LINK}`,
+      ].filter((line) => line !== null).join('\n')
+    : `Cook with Micheli on ShareChef AI 🍳 ${APP_LINK}`
   const enc = encodeURIComponent
-  const waHref = `https://wa.me/?text=${enc(`${shareText} ${APP_LINK}`)}`
+  const waHref = `https://wa.me/?text=${enc(fullRecipeText)}`
   const xHref = `https://twitter.com/intent/tweet?text=${enc(shareText)}&url=${enc(APP_LINK)}`
   const fbHref = `https://www.facebook.com/sharer/sharer.php?u=${enc(APP_LINK)}`
   const liHref = `https://www.linkedin.com/sharing/share-offsite/?url=${enc(APP_LINK)}`
@@ -50,14 +65,14 @@ export function SavedDetailPage() {
   const copyAndOpen = async (channel: ShareChannel, appUrl: string) => {
     setShareMsg(null)
     try {
-      await navigator.clipboard.writeText(`${shareText} ${APP_LINK}`)
+      await navigator.clipboard.writeText(fullRecipeText)
     } catch { /* clipboard blocked — still open the app */ }
     window.open(appUrl, '_blank', 'noopener,noreferrer')
     const earned = await recordShare(channel, id ?? null)
     setShareMsg(
       earned
-        ? '⭐ +1 Micheli Star — caption copied, paste it in your post!'
-        : 'Caption copied — paste it in your post! Sign in to earn Micheli Stars.'
+        ? '⭐ +1 Micheli Star — full recipe copied, paste it in your post!'
+        : 'Full recipe copied — paste it in your post! Sign in to earn Micheli Stars.'
     )
   }
 
@@ -74,7 +89,7 @@ export function SavedDetailPage() {
     setShareMsg(null)
     try {
       if (typeof navigator !== 'undefined' && navigator.share) {
-        await navigator.share({ title: recipe?.title ?? 'ShareChef AI', text: shareText, url: APP_LINK })
+        await navigator.share({ title: recipe?.title ?? 'ShareChef AI', text: fullRecipeText })
         await trackShare('native')
         return
       }
@@ -82,7 +97,7 @@ export function SavedDetailPage() {
       return // user dismissed the share sheet
     }
     try {
-      await navigator.clipboard.writeText(`${shareText} ${APP_LINK}`)
+      await navigator.clipboard.writeText(fullRecipeText)
       await trackShare('copy')
     } catch {
       setShareMsg(`${shareText} ${APP_LINK}`)
@@ -137,6 +152,7 @@ export function SavedDetailPage() {
               <a className="btn btn-ghost" href={liHref} target="_blank" rel="noopener noreferrer" onClick={() => trackShare('linkedin')}>LinkedIn</a>
               <button type="button" className="btn btn-ghost" onClick={() => copyAndOpen('instagram', 'https://www.instagram.com/')}>Instagram</button>
               <button type="button" className="btn btn-ghost" onClick={() => copyAndOpen('tiktok', 'https://www.tiktok.com/')}>TikTok</button>
+              <button type="button" className="btn btn-ghost" onClick={() => copyAndOpen('youtube', 'https://www.youtube.com/')}>YouTube</button>
             </div>
             {shareMsg && <div className="muted" style={{ marginTop: 4 }}>{shareMsg}</div>}
           </div>

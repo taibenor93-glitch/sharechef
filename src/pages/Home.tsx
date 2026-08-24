@@ -339,6 +339,8 @@ export function HomePage() {
             </div>
           </div>
 
+          {recipe.nutrition && <div className="muted" style={{ marginTop: 8 }}>🥗 Nutrition (per serving, estimate): {recipe.nutrition}</div>}
+
           {recipe.tip && <div className="tip">💡 {recipe.tip}</div>}
 
           <div className="row" style={{ justifyContent: 'flex-end' }}>

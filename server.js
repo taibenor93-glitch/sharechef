@@ -627,7 +627,8 @@ Return STRICT JSON in exactly this shape:
   "cook_time_minutes": 25,
   "servings": 2,
   "tags": ["short", "lowercase", "tags"],
-  "tip": "one concise helpful sentence"
+  "tip": "one concise helpful sentence",
+  "nutrition": "per-serving estimate, e.g. ~520 kcal · 24g protein · 18g fat · 61g carbs"
 }`,
         },
         { role: 'user', content: `Ingredients: ${ingredients.join(', ')}` },
@@ -648,6 +649,7 @@ Return STRICT JSON in exactly this shape:
       servings: toInt(raw.servings),
       tags: Array.isArray(raw.tags) ? raw.tags.map(String).slice(0, 5) : [],
       tip: String(raw.tip || ''),
+      nutrition: String(raw.nutrition || ''),
     })
   } catch (err) {
     console.error('[recipe] error:', err.message)

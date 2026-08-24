@@ -8,6 +8,7 @@ export function LoginPage() {
   const nav = useNavigate()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -49,9 +50,20 @@ export function LoginPage() {
             />
           </div>
           <div className="field">
-            <label className="label">Password</label>
+            <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+              <label className="label">Password</label>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                style={{ padding: '2px 8px', fontSize: 13 }}
+                onClick={() => setShowPassword((v) => !v)}
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+              >
+                {showPassword ? '🙈 Hide' : '👁 Show'}
+              </button>
+            </div>
             <input
-              type="password"
+              type={showPassword ? 'text' : 'password'}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Your password"
