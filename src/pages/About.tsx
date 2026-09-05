@@ -1,6 +1,11 @@
 import { Link } from 'react-router-dom'
+import { usePageMeta } from '../hooks/usePageMeta'
 
 export function AboutPage() {
+  usePageMeta(
+    'About ShareChef — Every Kitchen Deserves a Chef',
+    'ShareChef was built by one solo founder so anyone can cook a real dinner from what is already in the fridge. Meet Micheli, your voice guided chef.'
+  )
   return (
     <div className="container stack">
       <div>

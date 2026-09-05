@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import { usePageMeta } from '../hooks/usePageMeta'
 
 const FAQS: { q: string; a: string }[] = [
   {
@@ -36,6 +37,10 @@ const FAQS: { q: string; a: string }[] = [
 ]
 
 export function FAQPage() {
+  usePageMeta(
+    'ShareChef FAQ — Cooking With Micheli, Answered',
+    'How ShareChef works, what it costs, which devices it runs on, and what to do when Micheli cannot hear you. Answers to the questions people ask most.'
+  )
   return (
     <div className="container stack">
       <div>
@@ -46,7 +51,7 @@ export function FAQPage() {
 
       {FAQS.map((f) => (
         <div className="card-soft" key={f.q}>
-          <div className="section-title">{f.q}</div>
+          <h2 className="section-title">{f.q}</h2>
           <p style={{ margin: '6px 0 0', color: 'var(--ink-soft)' }}>{f.a}</p>
         </div>
       ))}

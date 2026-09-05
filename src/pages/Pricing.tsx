@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import { usePageMeta } from '../hooks/usePageMeta'
 
 interface Plan {
   name: string
@@ -46,6 +47,10 @@ const PLANS: Plan[] = [
 ]
 
 export function PricingPage() {
+  usePageMeta(
+    'ShareChef Pricing — Free During Launch',
+    'ShareChef is free during launch, with a free plan that stays. See what the coming Pro and Family plans add for busy households.'
+  )
   return (
     <div className="container stack">
       <div>
