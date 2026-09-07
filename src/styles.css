@@ -190,7 +190,7 @@ input::placeholder { color: var(--muted); }
 .orb-label { font-family: var(--display); font-size: 1.25rem; letter-spacing: .2px; }
 .voice-status { color: var(--ink-soft); font-size: 1rem; min-height: 1.5rem; }  /* glanceable while cooking */
 .voice-status .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--amber); margin-right: 7px; vertical-align: middle; }
-.link-btn { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 0.875rem; min-height: 2.75rem; text-decoration: underline; text-underline-offset: 3px; }
+.link-btn { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 0.875rem; padding: 0.875rem 0.25rem; margin: -0.875rem -0.25rem; text-decoration: underline; text-underline-offset: 3px; }  /* ~44px tap area without changing the line box */
 
 /* ---------- micheli star ---------- */
 .star-card { display: flex; align-items: center; gap: 16px; }
