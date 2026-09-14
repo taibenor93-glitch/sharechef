@@ -846,15 +846,27 @@ wss.on('connection', (browserWs, req) => {
   // Live transcript of this session (final lines only), used for resume-after-lock.
   const transcript = []
   let linesSinceFlush = 0
+  let cookWrite = Promise.resolve()
+  const clearCurrentCook = () => {
+    cookWrite = cookWrite.then(() => {
+      if (authToken && user) return clearCookState(authToken, user.id)
+      if (guestId) clearGuestCookState(guestId)
+    })
+    return cookWrite
+  }
   const flushCookState = () => {
-    if (transcript.length === 0) return
+    if (intentionalEnd || transcript.length === 0) return
     linesSinceFlush = 0
-    if (authToken && user) saveCookState(authToken, user.id, transcript.slice(-14), sessionLanguage)
-    else if (guestId) saveGuestCookState(guestId, transcript.slice(-14), sessionLanguage)
+    const lines = transcript.slice(-14)
+    cookWrite = cookWrite.then(() => {
+      if (intentionalEnd) return
+      if (authToken && user) return saveCookState(authToken, user.id, lines, sessionLanguage)
+      if (guestId) saveGuestCookState(guestId, lines, sessionLanguage)
+    })
   }
 
   const startOpenAI = () => {
-    if (started) return
+    if (started || intentionalEnd || browserWs.readyState !== WebSocket.OPEN) return
     started = true
     let openaiHeartbeat = null
 
@@ -870,7 +882,7 @@ wss.on('connection', (browserWs, req) => {
     const resumedLanguage =
       cookState && typeof cookState.language === 'string' && KNOWN_LANGUAGES.has(cookState.language)
         ? cookState.language : null
-    sessionLanguage = resumedLanguage || clientLanguage || profileLanguage || headerLanguage || 'English'
+    sessionLanguage = clientLanguage || profileLanguage || resumedLanguage || headerLanguage || 'English'
     console.log(`[WS] session language: ${sessionLanguage} (resumed=${resumedLanguage || '—'}, pick=${clientLanguage || '—'}, profile=${profileLanguage || '—'}, device=${headerLanguage || '—'})`)
     // NOTE (2026-08-04): the server used to push an `sc.session` status frame to
     // the browser here, and a `language` hint into the transcriber below. Both
@@ -952,6 +964,7 @@ wss.on('connection', (browserWs, req) => {
   })
 
   openaiWs.on('message', (data, isBinary) => {
+    if (intentionalEnd) return
     if (browserWs.readyState === WebSocket.OPEN) browserWs.send(data, { binary: isBinary })
     // Capture final transcript lines for resume-after-lock (signed-in users and tracked guests).
     // Only frames that can carry a finished transcript are parsed — audio deltas are not.
@@ -1020,8 +1033,8 @@ wss.on('connection', (browserWs, req) => {
       try {
         if (JSON.parse(text).type === 'end_session') {
           intentionalEnd = true
-          if (user && authToken) clearCookState(authToken, user.id)
-          else if (guestId) clearGuestCookState(guestId)
+          clearTimeout(authTimer)
+          void clearCurrentCook()
           return
         }
       } catch { /* fall through — treat as a normal frame */ }
@@ -1061,6 +1074,7 @@ wss.on('connection', (browserWs, req) => {
         }
         console.log(`[WS] auth: ${user ? `user ${user.id}` : guestId ? 'guest (tracked)' : 'guest'}${profile ? ' (profile loaded)' : ''}${cookState ? ' (resuming cook)' : ''}${memory ? ' (memory loaded)' : ''}${isReconnect ? ' (reconnect)' : ''}${isTestSession ? ' (TEST MODEL)' : ''}`)
         authInFlight = false
+        if (intentionalEnd) { await clearCurrentCook(); return }
         startOpenAI()
         return // the auth frame itself is never forwarded to OpenAI
       }

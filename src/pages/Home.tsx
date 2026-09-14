@@ -107,7 +107,9 @@ export function HomePage() {
     setVoiceError(null)
     if (status === 'idle') {
       startingRef.current = true
+      setStatus('connecting')
       await v.unlockAudio()
+      if (!startingRef.current) return
       // Hand the voice client a token PROVIDER, not a token — it re-fetches a
       // fresh one on every connect and every automatic reconnect, so a stale
       // token can never silently downgrade the session to guest.
@@ -118,6 +120,8 @@ export function HomePage() {
     } else {
       startingRef.current = false
       v.disconnect()
+      setLines([])
+      setServerAuth(null)
     }
   }
 

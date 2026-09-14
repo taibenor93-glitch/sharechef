@@ -134,7 +134,9 @@ export class RealtimeVoice {
   }
 
   private openSocket(): void {
-    this.ws = new WebSocket(`${WS_BASE}/ws/realtime`)
+    if (this.intentionalEnd) return
+    const socket = new WebSocket(`${WS_BASE}/ws/realtime`)
+    this.ws = socket
     this.cb.onStatus('connecting')
     this.ws.onopen = async () => {
       // Identify the signed-in user to the server before any audio flows.
@@ -146,6 +148,7 @@ export class RealtimeVoice {
       // Analytics identity must be settled BEFORE any identifier leaves the
       // device — voice and app events from one launch share the same ids.
       if (EVENTS_ON) { try { await initIdentity() } catch { /* identity optional */ } }
+      if (this.intentionalEnd || this.ws !== socket) return
       const isReconnectAttempt = this.reconnectAttempts > 0
       // Only tell the server "treat this as a real interrupted cook" once a
       // conversation had actually started — otherwise a blip during the very
@@ -171,6 +174,7 @@ export class RealtimeVoice {
       }
     }
     this.ws.onmessage = (e) => {
+      if (this.intentionalEnd || this.ws !== socket) return
       try {
         this.handleEvent(JSON.parse(e.data as string))
       } catch {
@@ -181,6 +185,7 @@ export class RealtimeVoice {
       /* the close handler that always follows decides whether to reconnect */
     }
     this.ws.onclose = () => {
+      if (this.ws !== socket) return
       this.stopListening()
       this.isPlayingAudio = false
       if (!this.intentionalEnd && this.reconnectAttempts < 3) {
@@ -209,10 +214,15 @@ export class RealtimeVoice {
     }
     this.stopListening()
     this.isPlayingAudio = false
+    this.hasStartedConversation = false
+    this.nextPlayTime = 0
+    this.pendingTranscript = ''
     // Tell the server this is a deliberate goodbye, not an interruption —
     // a deliberate end closes the cook instead of resuming it next time.
     this.wsSend({ type: 'end_session' })
     if (this.ws) {
+      this.ws.onopen = null
+      this.ws.onmessage = null
       this.ws.onclose = null
       this.ws.close(1000)
       this.ws = null
@@ -245,13 +255,19 @@ export class RealtimeVoice {
   }
 
   async startListening(): Promise<void> {
-    if (this.isListening) return
+    if (this.isListening || this.intentionalEnd) return
+    const socket = this.ws
     try {
       if (!this.micStream) {
-        this.micStream = await navigator.mediaDevices.getUserMedia({
+        const stream = await navigator.mediaDevices.getUserMedia({
           audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
           video: false,
         })
+        if (this.intentionalEnd || this.ws !== socket) {
+          stream.getTracks().forEach((track) => track.stop())
+          return
+        }
+        this.micStream = stream
       }
       if (!this.audioCtx) {
         this.audioCtx = new (
@@ -259,8 +275,10 @@ export class RealtimeVoice {
         )()
         await this.audioCtx!.audioWorklet.addModule('/audio-processor.js')
       }
+      if (this.intentionalEnd || this.ws !== socket) return
       if (this.audioCtx!.state === 'suspended') await this.audioCtx!.resume()
 
+      if (this.intentionalEnd || this.ws !== socket) return
       this.sourceNode = this.audioCtx!.createMediaStreamSource(this.micStream!)
       this.processorNode = new AudioWorkletNode(this.audioCtx!, 'pcm-audio-processor', {
         processorOptions: { inputRate: this.audioCtx!.sampleRate },
@@ -272,6 +290,7 @@ export class RealtimeVoice {
       this.isListening = true
       this.cb.onStatus('listening')
     } catch (err: any) {
+      if (this.intentionalEnd || this.ws !== socket) return
       console.error('startListening failed:', err?.name, err?.message)
       const friendly = err?.name === 'NotAllowedError'
         ? 'Micheli needs microphone access. Enable it in Settings > ShareChef > Microphone.'
