@@ -7,3 +7,6 @@ dist/
 server/.env
 *.local
 .DS_Store
+tests/.compiled-events/
+tests/.compiled-local/
+tsconfig.tsbuildinfo
