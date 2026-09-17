@@ -488,6 +488,95 @@ async function saveCookState(token, userId, lines, language) {
 // tab's life. Lost on a server restart — same as any OpenAI Realtime session
 // losing its own history on any drop, so that's an acceptable ceiling.
 const GUEST_COOK_CAP = 300
+// ---- Paywall: free-plan cook counting (3 fresh cooks per calendar month) ----
+// Server-authoritative via the service key. Every failure fails OPEN (the cook
+// is allowed): billing must never be able to break dinner.
+const FREE_COOKS_PER_MONTH = 3
+
+let cooksDb = null
+function cooksClient() {
+  const key = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY
+  if (!process.env.SUPABASE_URL || !key) return null
+  if (!cooksDb) {
+    cooksDb = createSupabaseClient(process.env.SUPABASE_URL, key, { auth: { persistSession: false } })
+  }
+  return cooksDb
+}
+
+function monthStartISO() {
+  const now = new Date()
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString()
+}
+
+async function monthlyCookCount(userId, guestId) {
+  const db = cooksClient()
+  if (!db || (!userId && !guestId)) return null
+  try {
+    let q = db.from('cooks').select('id', { count: 'exact', head: true }).gte('started_at', monthStartISO())
+    q = userId ? q.eq('user_id', userId) : q.eq('guest_id', guestId)
+    const { count, error } = await q
+    if (error) return null
+    return typeof count === 'number' ? count : null
+  } catch {
+    return null
+  }
+}
+
+async function recordCook(userId, guestId) {
+  const db = cooksClient()
+  if (!db || (!userId && !guestId)) return
+  try {
+    await db.from('cooks').insert(userId ? { user_id: userId } : { guest_id: guestId })
+  } catch {
+    /* counting is best-effort */
+  }
+}
+
+// ---- ShareChef Plus: RevenueCat is the receipt checker, profiles.plan is the gate ----
+// The public SDK key can read one subscriber's own record, nothing else. No secret
+// key is stored on the server. Any failure leaves the stored plan untouched.
+const RC_PUBLIC_KEY = process.env.REVENUECAT_PUBLIC_KEY || 'appl_GyazTyXgyVjKUwepwiTFyMXEIVp'
+const PLUS_PRODUCT_ID = 'com.sharechef.app.plus.monthly'
+
+async function revenueCatPlan(userId) {
+  const res = await fetch(`https://api.revenuecat.com/v1/subscribers/${encodeURIComponent(userId)}`, {
+    headers: { Authorization: `Bearer ${RC_PUBLIC_KEY}`, 'X-Platform': 'ios' },
+  })
+  if (!res.ok) throw new Error(`revenuecat ${res.status}`)
+  const body = await res.json()
+  const sub = body && body.subscriber ? body.subscriber : {}
+  const now = Date.now()
+  const active = (obj) => obj && obj.expires_date && Date.parse(obj.expires_date) > now
+  const ents = sub.entitlements || {}
+  if (Object.values(ents).some(active)) return 'plus'
+  const subs = sub.subscriptions || {}
+  if (active(subs[PLUS_PRODUCT_ID])) return 'plus'
+  return 'free'
+}
+
+// POST /api/plus/sync  (Authorization: Bearer <supabase access token>)
+// Re-checks RevenueCat for the signed-in user and writes profiles.plan.
+app.post('/api/plus/sync', async (req, res) => {
+  const auth = req.headers.authorization || ''
+  const token = auth.startsWith('Bearer ') ? auth.slice(7) : null
+  const user = await verifyUser(token)
+  if (!user) return res.status(401).json({ error: 'unauthorized' })
+  let plan
+  try {
+    plan = await revenueCatPlan(user.id)
+  } catch (err) {
+    console.error('[plus] revenuecat lookup failed:', err.message)
+    return res.status(502).json({ error: 'billing lookup failed' })
+  }
+  const db = cooksClient()
+  if (db) {
+    const { error } = await db.from('profiles').update({ plan }).eq('id', user.id)
+    if (error) console.error('[plus] plan write failed:', error.message)
+  }
+  console.log(`[plus] ${user.id} -> ${plan}`)
+  return res.json({ plan })
+})
+
 const guestCookState = new Map() // guestId -> { lines, language, updatedAt }
 
 function loadGuestCookState(guestId) {
@@ -755,7 +844,7 @@ async function loadProfile(token) {
     })
     const { data, error } = await client
       .from('profiles')
-      .select('id, gluten_free, dairy_free, kosher, celiac, allergies, has_met_micheli, language')
+      .select('id, gluten_free, dairy_free, kosher, celiac, allergies, has_met_micheli, language, plan')
       .maybeSingle()
     if (error || !data) return null
     return data
@@ -1075,6 +1164,21 @@ wss.on('connection', (browserWs, req) => {
         console.log(`[WS] auth: ${user ? `user ${user.id}` : guestId ? 'guest (tracked)' : 'guest'}${profile ? ' (profile loaded)' : ''}${cookState ? ' (resuming cook)' : ''}${memory ? ' (memory loaded)' : ''}${isReconnect ? ' (reconnect)' : ''}${isTestSession ? ' (TEST MODEL)' : ''}`)
         authInFlight = false
         if (intentionalEnd) { await clearCurrentCook(); return }
+        // Free-plan gate: 3 fresh cooks per month, Plus unlimited. Resumes,
+        // reconnects and verified test sessions never charge a cook. Any
+        // lookup failure fails open - billing must never break dinner.
+        if (!isTestSession && !isReconnect && !cookState && (user || guestId)) {
+          const plan = profile && profile.plan === 'plus' ? 'plus' : 'free'
+          if (plan !== 'plus') {
+            const used = await monthlyCookCount(user ? user.id : null, guestId)
+            if (used !== null && used >= FREE_COOKS_PER_MONTH) {
+              try { browserWs.send(JSON.stringify({ type: 'sc.limit', used, limit: FREE_COOKS_PER_MONTH })) } catch { /* closing anyway */ }
+              browserWs.close(1000)
+              return
+            }
+          }
+          void recordCook(user ? user.id : null, guestId)
+        }
         startOpenAI()
         return // the auth frame itself is never forwarded to OpenAI
       }

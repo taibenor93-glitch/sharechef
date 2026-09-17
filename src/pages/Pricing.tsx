@@ -13,43 +13,33 @@ const PLANS: Plan[] = [
   {
     name: 'Free',
     price: '$0',
-    tag: 'Forever',
+    tag: 'Stays free',
     features: [
-      'Cook with Micheli, voice guided',
+      '3 cooks with Micheli every month',
+      'Voice guided, hands free',
       'Recipes from your own ingredients',
-      'Save your favorite recipes',
-      'Share your creations',
+      'Save and share your creations',
     ],
   },
   {
-    name: 'Pro',
-    price: '$4.99/mo',
-    tag: 'Coming soon',
+    name: 'ShareChef Plus',
+    price: '$9.99/mo',
+    tag: 'Unlimited',
     highlight: true,
     features: [
+      'Unlimited cooks with Micheli',
       'Everything in Free',
-      'Unlimited saved recipes',
-      'Full Micheli Stars progression',
-      'Early access to new features',
-    ],
-  },
-  {
-    name: 'Family',
-    price: '$9.99/mo',
-    tag: 'Coming soon',
-    features: [
-      'Everything in Pro',
-      'Peace-of-mind notifications for parents',
-      'Multiple family profiles',
-      'Priority support',
+      'Micheli remembers how you like things',
+      'Dietary safety always on',
+      'Cancel anytime in your App Store settings',
     ],
   },
 ]
 
 export function PricingPage() {
   usePageMeta(
-    'ShareChef Pricing — Free During Launch',
-    'ShareChef is free during launch, with a free plan that stays. See what the coming Pro and Family plans add for busy households.'
+    'ShareChef Pricing: Free plan and ShareChef Plus',
+    'ShareChef has a free plan that stays: 3 cooks with Micheli a month. ShareChef Plus is $9.99 a month for unlimited cooks.'
   )
   return (
     <div className="container stack">
@@ -57,8 +47,8 @@ export function PricingPage() {
         <div className="eyebrow">Pricing</div>
         <h1 className="page-title">Simple plans, honest promise.</h1>
         <p className="page-sub">
-          During launch, everything is free for our founding families, and the
-          heart of ShareChef will always have a free plan.
+          Three cooks a month with Micheli, free, for as long as ShareChef exists.
+          Cooking every night? Plus takes the limit off.
         </p>
       </div>
 
@@ -82,11 +72,11 @@ export function PricingPage() {
       </div>
 
       <div className="card-soft" style={{ textAlign: 'center' }}>
-        <div className="section-title">Founding families offer</div>
+        <div className="section-title">Start with the free plan</div>
         <p style={{ color: 'var(--ink-soft)', margin: '6px 0 14px' }}>
-          Join now, while everything is free. Early members shape what we build next.
+          Plus is bought inside the iPhone app, billed through your Apple ID, and renews monthly until you cancel.
         </p>
-        <Link to="/" className="btn btn-primary">Start cooking free</Link>
+        <Link to="/" className="btn btn-primary">Start cooking</Link>
       </div>
     </div>
   )

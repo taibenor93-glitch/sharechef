@@ -10,6 +10,8 @@ import type { GeneratedRecipe } from '../lib/recipeApi'
 import { getStarProgress } from '../lib/stars'
 import { LANGUAGES, initialLanguage, saveLanguage, savedLanguage } from '../lib/language'
 import { track } from '../lib/events'
+import { UpgradeSheet } from '../components/UpgradeSheet'
+import { syncPlusWithServer } from '../lib/purchases'
 
 type Line = { role: 'user' | 'chef'; text: string }
 
@@ -32,6 +34,7 @@ export function HomePage() {
   const [status, setStatus] = useState<VoiceStatus>('idle')
   const [lines, setLines] = useState<Line[]>([])
   const [voiceError, setVoiceError] = useState<string | null>(null)
+  const [limitInfo, setLimitInfo] = useState<{ used: number; limit: number } | null>(null)
   // What the server says about this session. Null until a session starts.
   const [serverAuth, setServerAuth] = useState<'user' | 'guest' | null>(null)
   const convoRef = useRef<HTMLDivElement | null>(null)
@@ -55,6 +58,7 @@ export function HomePage() {
       onTranscript: (text, role) => setLines((prev) => [...prev, { role, text }]),
       onError: (m) => setVoiceError(m),
       onSession: (info) => setServerAuth(info.auth),
+      onLimit: (info) => { startingRef.current = false; setLimitInfo(info) },
     })
     voiceRef.current = v
     return () => v.disconnect()
@@ -81,6 +85,7 @@ export function HomePage() {
     setSavedCount((recipesRes.count ?? 0) + (sharesRes.count ?? 0))
   }
   useEffect(() => { loadCount() /* eslint-disable-line */ }, [userId])
+  useEffect(() => { if (userId) void syncPlusWithServer() }, [userId])
 
   // A signed-in user's saved language pick follows their account across devices.
   useEffect(() => {
@@ -256,6 +261,16 @@ export function HomePage() {
             <button type="button" className="link-btn" onClick={toggleVoice}>End session</button>
           )}
           {voiceError && <div className="alert alert-error" style={{ marginTop: 6 }}>{voiceError}</div>}
+          {limitInfo && (
+            <UpgradeSheet
+              used={limitInfo.used}
+              limit={limitInfo.limit}
+              userId={userId}
+              onClose={() => setLimitInfo(null)}
+              onUnlocked={() => { setLimitInfo(null); void toggleVoice() }}
+              onNeedSignIn={() => { setLimitInfo(null); nav('/login') }}
+            />
+          )}
         </div>
 
         {lines.length > 0 && (
