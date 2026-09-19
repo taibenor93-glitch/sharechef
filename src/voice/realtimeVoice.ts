@@ -18,6 +18,8 @@ export interface VoiceCallbacks {
   onError: (message: string) => void
   /** What the SERVER decided about this session — the truth, not what the app assumed. */
   onSession?: (info: { auth: 'user' | 'guest'; language: string }) => void
+  /** Free plan is out of cooks this month - show the upgrade sheet. */
+  onLimit?: (info: { used: number; limit: number }) => void
 }
 
 export class RealtimeVoice {
@@ -329,6 +331,12 @@ export class RealtimeVoice {
       // Server's verdict on who this session belongs to.
       case 'sc.session':
         this.cb.onSession?.({ auth: msg.auth === 'user' ? 'user' : 'guest', language: String(msg.language ?? '') })
+        break
+      // Free plan is out of cooks - end cleanly (no reconnect) and surface the sheet.
+      case 'sc.limit':
+        this.disconnect()
+        this.cb.onStatus('idle')
+        this.cb.onLimit?.({ used: Number(msg.used ?? 0), limit: Number(msg.limit ?? 3) })
         break
       // Assistant audio (gpt-realtime GA event name)
       case 'response.output_audio.delta':
