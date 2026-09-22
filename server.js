@@ -532,6 +532,32 @@ async function recordCook(userId, guestId) {
   }
 }
 
+// One-shot startup self-check. The 1.6.2 Plus release shipped code that reads
+// profiles.plan and writes to `cooks` before the migration had been applied, and
+// nothing said so: every cook silently failed open, the paywall became
+// unreachable, and a purchase had nowhere to be recorded. Cheap to check once,
+// impossible to miss in the logs, and zero cost per request.
+let plusSchemaOk = null // null = not checked yet
+async function checkPlusSchema() {
+  const db = cooksClient()
+  if (!db) {
+    plusSchemaOk = false
+    console.warn('[plus] NO SERVICE KEY — free-cook counting is disabled and every cook will be allowed. The paywall cannot appear.')
+    return
+  }
+  const planCol = await db.from('profiles').select('plan').limit(1)
+  const cooksTable = await db.from('cooks').select('id', { head: true, count: 'exact' }).limit(1)
+  const missing = []
+  if (planCol.error) missing.push(`profiles.plan (${planCol.error.message})`)
+  if (cooksTable.error) missing.push(`cooks table (${cooksTable.error.message})`)
+  plusSchemaOk = missing.length === 0
+  if (!plusSchemaOk) {
+    console.warn(`[plus] SCHEMA MISSING — run supabase/migrations/20260914_plans_and_cooks.sql. Missing: ${missing.join('; ')}`)
+  } else {
+    console.log('[plus] schema OK (profiles.plan + cooks)')
+  }
+}
+
 // ---- ShareChef Plus: RevenueCat is the receipt checker, profiles.plan is the gate ----
 // The public SDK key can read one subscriber's own record, nothing else. No secret
 // key is stored on the server. Any failure leaves the stored plan untouched.
@@ -554,24 +580,69 @@ async function revenueCatPlan(userId) {
   return 'free'
 }
 
+// Writes profiles.plan and reports whether the write actually landed.
+//
+// UPSERT, never UPDATE: a user with no profiles row yet (signup insert failed,
+// account predates the row, confirmation happened on another device) would have
+// their paid plan written to ZERO rows, with no error, and stay stuck behind
+// the paywall they just paid to remove.
+//
+// Two writers, in order: the service key when one is configured, otherwise the
+// user's own token (RLS policy profiles_update_own covers their own row). The
+// plan is recorded either way, so a missing service key cannot silently swallow
+// a purchase.
+// In-process dependency seams for offline tests (same pattern as the deletion
+// verifier above). Unreachable over HTTP; no production env var activates them.
+let plusUserVerifier = (token) => verifyUser(token)
+let plusRevenueCatPlan = (userId) => revenueCatPlan(userId)
+let planWriter = null
+
+async function storePlan(userId, plan, token) {
+  if (planWriter) return planWriter(userId, plan, token)
+  const service = cooksClient()
+  if (service) {
+    const { error } = await service.from('profiles').upsert({ id: userId, plan }, { onConflict: 'id' })
+    if (!error) return true
+    console.error('[plus] service-key plan write failed:', error.message)
+  }
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !token) return false
+  try {
+    const client = createSupabaseClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: { persistSession: false },
+      global: { headers: { Authorization: `Bearer ${token}` } },
+    })
+    const { error } = await client.from('profiles').upsert({ id: userId, plan }, { onConflict: 'id' })
+    if (error) {
+      console.error('[plus] user-token plan write failed:', error.message)
+      return false
+    }
+    return true
+  } catch (err) {
+    console.error('[plus] plan write threw:', err.message)
+    return false
+  }
+}
+
 // POST /api/plus/sync  (Authorization: Bearer <supabase access token>)
 // Re-checks RevenueCat for the signed-in user and writes profiles.plan.
+// Only ever reports a plan it actually STORED — the client treats this answer
+// as proof the gate will honour the purchase, so reporting an unstored 'plus'
+// would send a paying customer straight back to the paywall.
 app.post('/api/plus/sync', async (req, res) => {
   const auth = req.headers.authorization || ''
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : null
-  const user = await verifyUser(token)
+  const user = await plusUserVerifier(token)
   if (!user) return res.status(401).json({ error: 'unauthorized' })
   let plan
   try {
-    plan = await revenueCatPlan(user.id)
+    plan = await plusRevenueCatPlan(user.id)
   } catch (err) {
     console.error('[plus] revenuecat lookup failed:', err.message)
     return res.status(502).json({ error: 'billing lookup failed' })
   }
-  const db = cooksClient()
-  if (db) {
-    const { error } = await db.from('profiles').update({ plan }).eq('id', user.id)
-    if (error) console.error('[plus] plan write failed:', error.message)
+  if (!(await storePlan(user.id, plan, token))) {
+    console.error(`[plus] ${user.id} -> ${plan} NOT STORED`)
+    return res.status(503).json({ error: 'plan store unavailable' })
   }
   console.log(`[plus] ${user.id} -> ${plan}`)
   return res.json({ plan })
@@ -747,7 +818,19 @@ Return STRICT JSON in exactly this shape:
 })
 
 app.get('/health', (_req, res) =>
-  res.json({ status: 'ok', model: REALTIME_MODEL, voice: REALTIME_VOICE, apiKey: Boolean(process.env.OPENAI_API_KEY) })
+  // cookCounting reports whether the free-plan gate can actually run. Counting
+  // the `cooks` table needs the service key; without it every cook fails open,
+  // nobody ever reaches the limit, and the paywall is unreachable — which looks
+  // to App Review exactly like a missing in-app purchase. Boolean only, same as
+  // apiKey above: no secret is exposed.
+  res.json({
+    status: 'ok',
+    model: REALTIME_MODEL,
+    voice: REALTIME_VOICE,
+    apiKey: Boolean(process.env.OPENAI_API_KEY),
+    cookCounting: Boolean(cooksClient()),
+    plusSchema: plusSchemaOk, // null until the startup check has finished
+  })
 )
 
 // ── Temporary QA text chat: Micheli in text mode ─────────────────────────────
@@ -842,11 +925,21 @@ async function loadProfile(token) {
       auth: { persistSession: false },
       global: { headers: { Authorization: `Bearer ${token}` } },
     })
+    // select('*'), NOT an explicit column list. A named column that does not
+    // exist yet makes PostgREST reject the WHOLE query (42703), so shipping code
+    // that names a column ahead of its migration silently takes the entire
+    // profile down with it — and with it the celiac/kosher/allergy rules that
+    // keep Micheli's food safe. That happened with `plan` in 1.6.2. With '*'
+    // a not-yet-migrated column simply arrives undefined, and every rule that
+    // does exist keeps working.
     const { data, error } = await client
       .from('profiles')
-      .select('id, gluten_free, dairy_free, kosher, celiac, allergies, has_met_micheli, language, plan')
+      .select('*')
       .maybeSingle()
-    if (error || !data) return null
+    if (error || !data) {
+      if (error) console.error('[profile] query rejected:', error.message)
+      return null
+    }
     return data
   } catch (err) {
     console.error('[profile] load failed:', err.message)
@@ -1247,6 +1340,7 @@ if (!process.env.SC_TEST_NO_LISTEN) {
     console.log(`\n  ShareChef AI  →  http://localhost:${PORT}`)
     console.log(`  Realtime WS   →  /ws/realtime  (${REALTIME_MODEL}, ${REALTIME_VOICE})`)
     console.log(`  API key       →  ${process.env.OPENAI_API_KEY ? '✓ configured' : '✗ MISSING'}\n`)
+    void checkPlusSchema()
   })
 }
 
@@ -1260,5 +1354,15 @@ export const __test = {
   isRecentPasswordAuth,
   setDeletionUserVerifier(fn) { deletionUserVerifier = fn },
   resetDeletionUserVerifier() { deletionUserVerifier = verifyUserForDeletion },
+  setPlusSeams({ verifyUser: v, revenueCatPlan: rc, planWriter: pw }) {
+    if (v) plusUserVerifier = v
+    if (rc) plusRevenueCatPlan = rc
+    if (pw !== undefined) planWriter = pw
+  },
+  resetPlusSeams() {
+    plusUserVerifier = (token) => verifyUser(token)
+    plusRevenueCatPlan = (userId) => revenueCatPlan(userId)
+    planWriter = null
+  },
   resetDeleteRateLimit() { deleteBuckets.clear() },
 }

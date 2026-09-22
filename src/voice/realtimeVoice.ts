@@ -188,9 +188,11 @@ export class RealtimeVoice {
     }
     this.ws.onclose = () => {
       if (this.ws !== socket) return
-      this.stopListening()
       this.isPlayingAudio = false
       if (!this.intentionalEnd && this.reconnectAttempts < 3) {
+        // A reconnect is coming in under 3 seconds: unhook the audio graph but
+        // keep the mic stream warm so the cook resumes without a stutter.
+        this.stopListening()
         this.reconnectAttempts++
         this.cb.onStatus('connecting')
         this.reconnectTimer = window.setTimeout(
@@ -199,6 +201,12 @@ export class RealtimeVoice {
         )
         return
       }
+      // No reconnect is coming — the session is over. stopListening() alone
+      // leaves the MediaStream tracks live, which keeps iOS's recording
+      // indicator lit and the mic held open while the UI says "Tap to talk".
+      // The microphone must go dark whenever the session does.
+      this.releaseMic()
+      this.releaseWakeLock()
       if (!this.intentionalEnd) {
         this.cb.onError('The connection dropped. Tap the mic — Micheli will pick up where you were.')
       }
@@ -214,7 +222,6 @@ export class RealtimeVoice {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null
     }
-    this.stopListening()
     this.isPlayingAudio = false
     this.hasStartedConversation = false
     this.nextPlayTime = 0
@@ -229,12 +236,8 @@ export class RealtimeVoice {
       this.ws.close(1000)
       this.ws = null
     }
-    if (this.micStream) {
-      this.micStream.getTracks().forEach((t) => t.stop())
-      this.micStream = null
-    }
-    // Close audio contexts so their memory is fully reclaimed between sessions.
-    if (this.audioCtx) { this.audioCtx.close().catch(() => {}); this.audioCtx = null }
+    this.releaseMic()
+    // Close the playback context too so its memory is reclaimed between sessions.
     if (this.playbackCtx) { this.playbackCtx.close().catch(() => {}); this.playbackCtx = null }
     this.cb.onStatus('idle')
   }
@@ -292,6 +295,10 @@ export class RealtimeVoice {
       this.isListening = true
       this.cb.onStatus('listening')
     } catch (err: any) {
+      // The mic may already be open (getUserMedia succeeded, the worklet did
+      // not). Hand it back before doing anything else — otherwise a failed
+      // start leaves the recording indicator on with no session behind it.
+      this.releaseMic()
       if (this.intentionalEnd || this.ws !== socket) return
       console.error('startListening failed:', err?.name, err?.message)
       const friendly = err?.name === 'NotAllowedError'
@@ -300,6 +307,22 @@ export class RealtimeVoice {
       this.cb.onError(friendly)
       this.cb.onStatus('ready')
     }
+  }
+
+  /**
+   * Hard-stop the microphone: unhook the audio graph AND stop the underlying
+   * MediaStream tracks. stopListening() deliberately keeps the stream alive
+   * between turns (re-acquiring it every turn is slow and flickers the iOS
+   * indicator), so this is the only thing that actually releases the mic.
+   * Call it on every path that ends a session.
+   */
+  private releaseMic(): void {
+    this.stopListening()
+    if (this.micStream) {
+      this.micStream.getTracks().forEach((t) => t.stop())
+      this.micStream = null
+    }
+    if (this.audioCtx) { this.audioCtx.close().catch(() => {}); this.audioCtx = null }
   }
 
   stopListening(): void {

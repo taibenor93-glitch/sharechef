@@ -14,6 +14,8 @@ type Props = {
   onUnlocked: () => void
   /** Guests need an account before buying. */
   onNeedSignIn: () => void
+  /** Optional headline override (e.g. when opened from the Pricing page, not the limit). */
+  headline?: string
 }
 
 /**
@@ -21,15 +23,24 @@ type Props = {
  * Apple review requirements covered here: price and period, auto-renew
  * disclosure, Restore Purchases, Terms of Use and Privacy Policy links.
  */
-export function UpgradeSheet({ limit, userId, onClose, onUnlocked, onNeedSignIn }: Props) {
+export function UpgradeSheet({ limit, userId, onClose, onUnlocked, onNeedSignIn, headline }: Props) {
   const [price, setPrice] = useState<string>('$9.99')
   const [busy, setBusy] = useState<'buy' | 'restore' | null>(null)
   const [note, setNote] = useState<string | null>(null)
+  // Whether the App Store actually handed us the product. A failed lookup used
+  // to look identical to a successful one, because `price` falls back to a
+  // hardcoded string — so the button stayed lit and buying it did nothing.
+  const [product, setProduct] = useState<'checking' | 'ready' | 'unavailable'>('checking')
 
   useEffect(() => {
     if (!userId) return
     let alive = true
-    getPlusPrice(userId).then((p) => { if (alive && p) setPrice(p.priceString) })
+    getPlusPrice(userId).then((p) => {
+      if (!alive) return
+      if (p) { setPrice(p.priceString); setProduct('ready'); return }
+      setProduct('unavailable')
+      setNote('We could not load ShareChef Plus from the App Store. Please check your connection and try again in a moment.')
+    })
     return () => { alive = false }
   }, [userId])
 
@@ -40,16 +51,29 @@ export function UpgradeSheet({ limit, userId, onClose, onUnlocked, onNeedSignIn 
     setBusy(null)
     if (outcome === 'purchased') { onUnlocked(); return }
     if (outcome === 'cancelled') return
-    if (outcome === 'unavailable') { setNote('Plus is not available on this device yet. Please try again from the iPhone app.'); return }
-    setNote('Something went wrong with the purchase. You were not charged. Please try again.')
+    if (outcome === 'unavailable') {
+      setNote('ShareChef Plus is not available to buy right now. Please try again in a few minutes.')
+      return
+    }
+    if (outcome === 'pending') {
+      // Apple took the payment; only our record of it is behind. Saying
+      // "you were not charged" here would be a lie to a paying customer.
+      setNote('Your purchase went through. It is taking a moment to activate — tap Restore Purchases in a minute and you are all set.')
+      return
+    }
+    setNote('The purchase did not go through and you were not charged. Please try again.')
   }
 
   async function handleRestore() {
     if (!userId) { onNeedSignIn(); return }
     setBusy('restore'); setNote(null)
-    const ok = await restorePlus(userId)
+    const outcome = await restorePlus(userId)
     setBusy(null)
-    if (ok) { onUnlocked(); return }
+    if (outcome === 'restored') { onUnlocked(); return }
+    if (outcome === 'unavailable') {
+      setNote('We could not reach the App Store to check. Please check your connection and try again.')
+      return
+    }
     setNote('No ShareChef Plus subscription found for this Apple ID.')
   }
 
@@ -73,7 +97,7 @@ export function UpgradeSheet({ limit, userId, onClose, onUnlocked, onNeedSignIn 
       >
         <div style={{ color: GOLD, letterSpacing: 2, fontSize: 12, marginBottom: 10 }}>SHARECHEF PLUS</div>
         <h2 style={{ margin: '0 0 10px', fontSize: 22, lineHeight: 1.25 }}>
-          You&apos;ve cooked your {limit} free meals this month
+          {headline ?? <>You&apos;ve cooked your {limit} free meals this month</>}
         </h2>
         <p style={{ margin: '0 0 18px', opacity: 0.9, fontSize: 15, lineHeight: 1.5 }}>
           Micheli loved cooking with you. Plus keeps her in your kitchen every
@@ -83,14 +107,19 @@ export function UpgradeSheet({ limit, userId, onClose, onUnlocked, onNeedSignIn 
         <button
           type="button"
           onClick={handleBuy}
-          disabled={busy !== null}
+          disabled={busy !== null || product === 'unavailable'}
           style={{
             width: '100%', padding: '14px 16px', borderRadius: 12, border: 'none',
             background: GOLD, color: '#2D0826', fontSize: 16, fontWeight: 700,
-            cursor: busy ? 'wait' : 'pointer', opacity: busy ? 0.7 : 1,
+            cursor: busy ? 'wait' : product === 'unavailable' ? 'not-allowed' : 'pointer',
+            opacity: busy || product === 'unavailable' ? 0.55 : 1,
           }}
         >
-          {busy === 'buy' ? 'Opening App Store…' : `Get Plus · ${price}/month`}
+          {busy === 'buy'
+            ? 'Opening App Store…'
+            : product === 'unavailable'
+              ? 'Plus is unavailable right now'
+              : `Get Plus · ${price}/month`}
         </button>
         {!userId && (
           <p style={{ margin: '10px 0 0', fontSize: 13, opacity: 0.8 }}>

@@ -1,6 +1,7 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth, setGuest } from '../hooks/useAuth'
+import { PRIVACY_URL, TERMS_URL } from '../lib/purchases'
 
 export function Layout() {
   const nav = useNavigate()
@@ -52,6 +53,11 @@ export function Layout() {
         <NavLink to="/about" className="link-btn" style={{ textDecoration: 'none' }}>About</NavLink>
         <NavLink to="/faq" className="link-btn" style={{ textDecoration: 'none' }}>FAQ</NavLink>
         <NavLink to="/pricing" className="link-btn" style={{ textDecoration: 'none' }}>Pricing</NavLink>
+        {/* Apple expects the subscription's Terms of Use (EULA) and Privacy
+            Policy to be reachable from inside the app, not only from the
+            paywall a user may never open. */}
+        <a href={PRIVACY_URL} target="_blank" rel="noreferrer" className="link-btn" style={{ textDecoration: 'none' }}>Privacy</a>
+        <a href={TERMS_URL} target="_blank" rel="noreferrer" className="link-btn" style={{ textDecoration: 'none' }}>Terms</a>
         <span>© {new Date().getFullYear()} ShareChef</span>
       </footer>
     </div>
