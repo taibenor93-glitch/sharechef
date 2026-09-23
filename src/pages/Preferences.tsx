@@ -11,33 +11,29 @@ import {
 import { resetIdentity } from '../lib/session'
 
 export function PreferencesPage() {
-  const { userId, session } = useAuth()
+  const { userId } = useAuth()
   const navigate = useNavigate()
 
   // ── Account deletion (Revision 6) ──────────────────────────────────────────
-  // Password re-entry goes ONLY to Supabase auth (signInWithPassword) — never
-  // to the ShareChef server. The server requires the verified JWT's password
-  // authentication-method timestamp to fall inside a narrow window.
+  // Deletion needs only the "I understand" confirmation and the user's current
+  // signed-in session (App Store Guideline 5.1.1(v): no password re-entry or
+  // other extra steps). The server derives the account from the verified token.
   const [delStep, setDelStep] = useState<'closed' | 'form' | 'working' | 'done'>('closed')
-  const [delPassword, setDelPassword] = useState('')
   const [delConfirmed, setDelConfirmed] = useState(false)
   const [delError, setDelError] = useState<string | null>(null)
 
   const onDeleteAccount = async () => {
     if (!userId || delStep === 'working') return
-    const email = session?.user?.email
-    if (!email) { setDelError('Could not read your account email. Sign out and back in, then try again.'); return }
+    if (!delConfirmed) return
     setDelError(null)
     setDelStep('working')
     try {
-      // 1) Fresh password sign-in — proves possession of the password and gives
-      //    a token the server accepts as genuinely recent. Password → Supabase only.
-      const { data: signIn, error: signInError } = await supabase.auth.signInWithPassword({
-        email,
-        password: delPassword,
-      })
-      if (signInError || !signIn?.session?.access_token) {
-        setDelError('Password incorrect. Nothing was deleted.')
+      // 1) Current session token. getSession() refreshes an expired access token,
+      //    so a user who left the app open still gets a valid one.
+      const { data: current } = await supabase.auth.getSession()
+      const accessToken = current?.session?.access_token
+      if (!accessToken || current.session?.user?.id !== userId) {
+        setDelError('Your session has expired. Sign in again, then delete your account. Nothing was deleted.')
         setDelStep('form')
         return
       }
@@ -51,7 +47,7 @@ export function PreferencesPage() {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${signIn.session.access_token}`,
+            Authorization: `Bearer ${accessToken}`,
           },
           body: '{}',
         })
@@ -83,7 +79,6 @@ export function PreferencesPage() {
       await purgeAccountLocal(userId)
       await resetIdentity()
       await supabase.auth.signOut({ scope: 'local' }).catch(() => undefined)
-      setDelPassword('')
       setDelStep('done')
       setTimeout(() => navigate('/login', { replace: true }), 2200)
     } catch {
@@ -244,14 +239,6 @@ export function PreferencesPage() {
                 This permanently deletes your account, saved recipes, Micheli's memory of you, cooking
                 sessions, shares, and associated usage analytics. This cannot be undone.
               </p>
-              <input
-                type="password"
-                value={delPassword}
-                onChange={(e) => setDelPassword(e.target.value)}
-                placeholder="Enter your password to confirm"
-                autoComplete="current-password"
-                disabled={delStep === 'working'}
-              />
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
                 <input
                   type="checkbox"
@@ -268,14 +255,14 @@ export function PreferencesPage() {
                   className="btn btn-primary"
                   style={{ background: '#b84a4a' }}
                   onClick={onDeleteAccount}
-                  disabled={delStep === 'working' || !delPassword || !delConfirmed}
+                  disabled={delStep === 'working' || !delConfirmed}
                 >
                   {delStep === 'working' ? 'Deleting…' : 'Permanently delete my account'}
                 </button>
                 <button
                   type="button"
                   className="btn btn-ghost"
-                  onClick={() => { setDelStep('closed'); setDelPassword(''); setDelConfirmed(false); setDelError(null) }}
+                  onClick={() => { setDelStep('closed'); setDelConfirmed(false); setDelError(null) }}
                   disabled={delStep === 'working'}
                 >
                   Cancel

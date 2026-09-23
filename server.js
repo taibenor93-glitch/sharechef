@@ -64,19 +64,17 @@ app.use('/api/events', (err, _req, res, _next) => {
 })
 
 // ── Account deletion (Revision 6) ────────────────────────────────────────────
-// PERMANENT, privacy-first account deletion. Requires a RECENT password method
-// entry in the verified JWT's `amr` claim. Refreshing a session can issue a new
-// token but does not turn the original authentication method timestamp into a
-// new password proof.
-// The password itself goes only from the client to Supabase auth; this server
-// never sees, accepts, or logs it.
+// PERMANENT, privacy-first account deletion. Authorized by the user's normal
+// signed-in session token, verified live with Supabase (a signed-out or revoked
+// session fails). No password re-entry: App Store Guideline 5.1.1(v) forbids
+// making deletion require extra credentials or steps beyond a confirmation, and
+// the client already shows an explicit "I understand" confirmation.
 // Analytics removal is explicit and privacy-first (reviewer-approved): every
 // app_events row carrying ANY of the user's installation ids is removed — even
 // rows another household member generated on a shared installation. Functional
 // data of other users is never touched (it is keyed by their own user_id).
 // Hard delete only (shouldSoftDelete=false); production CASCADE FKs then remove
 // profiles, recipes, shares, cook_sessions, micheli_memory in one step.
-const REAUTH_WINDOW_MS = 5 * 60 * 1000 // 5 min: narrow, documented reauth window
 const DELETE_MAX_PER_HOUR = 5
 const deleteBuckets = new Map() // ip → { hourStart, count } (per-process, best-effort)
 function deleteRateLimited(key) {
@@ -86,19 +84,6 @@ function deleteRateLimited(key) {
   b.count++
   if (deleteBuckets.size > 5000) deleteBuckets.clear() // memory ceiling
   return b.count > DELETE_MAX_PER_HOUR
-}
-
-// Supabase JWT `amr` timestamps are epoch seconds. Require a password entry in
-// the narrow window; account-wide last_sign_in_at is not sufficient because a
-// login on another device could otherwise authorize this token.
-function isRecentPasswordAuth(amr, now = Date.now()) {
-  if (!Array.isArray(amr)) return false
-  return amr.some((entry) => {
-    if (!entry || entry.method !== 'password' || !Number.isFinite(entry.timestamp)) return false
-    const t = Number(entry.timestamp) * 1000
-    if (t > now + 60_000) return false
-    return now - t <= REAUTH_WINDOW_MS
-  })
 }
 
 // Admin client (service-role) — created lazily, server-side only. Independent of
@@ -131,7 +116,7 @@ async function verifyUserForDeletion(token) {
     if (error || !data?.user) return null
     const claims = decodeJwtPayload(token)
     if (!claims || claims.sub !== data.user.id) return null
-    return { id: data.user.id, amr: claims.amr }
+    return { id: data.user.id }
   } catch { return null }
 }
 
@@ -177,9 +162,6 @@ app.post('/api/account/delete', express.json({ limit: '1kb' }), async (req, res)
     if (deleteRateLimited(req.ip || 'unknown')) return res.status(429).json({ error: 'rate limited' })
     const user = await deletionUserVerifier(token)
     if (!user) return res.status(401).json({ error: 'invalid token' })
-    if (!isRecentPasswordAuth(user.amr)) {
-      return res.status(403).json({ error: 'recent sign-in required' })
-    }
     const db = adminClient()
     if (!db) return res.status(503).json({ error: 'deletion not configured' })
     const result = await performAccountDeletion(db, user.id)
@@ -1351,7 +1333,6 @@ export const __test = {
   EVENT_NAMES_SERVER,
   emitServerEvent,
   performAccountDeletion,
-  isRecentPasswordAuth,
   setDeletionUserVerifier(fn) { deletionUserVerifier = fn },
   resetDeletionUserVerifier() { deletionUserVerifier = verifyUserForDeletion },
   setPlusSeams({ verifyUser: v, revenueCatPlan: rc, planWriter: pw }) {

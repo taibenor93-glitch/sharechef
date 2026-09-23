@@ -40,7 +40,7 @@ const { app, __test } = await import('../server.js')
 __test.setDeletionUserVerifier(async (token) => {
   const [prefix, id, ms] = String(token).split(':')
   if (prefix !== 'test' || !/^[0-9a-f-]{36}$/i.test(id) || !Number.isFinite(Number(ms))) return null
-  return { id, amr: [{ method: 'password', timestamp: Number(ms) / 1000 }] }
+  return { id }
 })
 const srv = app.listen(3111)
 await sleep(100)
@@ -57,12 +57,15 @@ await sleep(100)
   check('invalid JWT → 401', r.status === 401)
 }
 {
+  // Guideline 5.1.1(v): an ordinary signed-in session (not a fresh password
+  // sign-in) must be enough. A token from a session that started long ago, and
+  // since refreshed, reaches the deletion step (503 only because no service key here).
   const r = await del(3111, { token: staleToken() })
-  check('stale/refresh-only session → 403 (recent password sign-in required)', r.status === 403)
+  check('long-lived signed-in session is NOT asked to re-enter a password (no 403)', r.status === 503 && r.json?.error === 'deletion not configured')
 }
 {
   const r = await del(3111, { token: freshToken() })
-  check('recent sign-in passes reauth gate (503 only because no service key here)', r.status === 503 && r.json?.error === 'deletion not configured')
+  check('fresh signed-in session reaches deletion step (503 only because no service key here)', r.status === 503 && r.json?.error === 'deletion not configured')
 }
 await new Promise((resolve) => srv.close(resolve))
 
@@ -175,15 +178,8 @@ function scenarioRows() {
 }
 
 {
-  // Reauth window logic (pure).
-  const now = Date.now()
-  const amr = (method, ms) => [{ method, timestamp: ms / 1000 }]
-  check('recent password AMR: just signed in → true', __test.isRecentPasswordAuth(amr('password', now - 5_000), now) === true)
-  check('recent password AMR: 4m59s ago → true', __test.isRecentPasswordAuth(amr('password', now - 299_000), now) === true)
-  check('stale password AMR → false', __test.isRecentPasswordAuth(amr('password', now - 360_000), now) === false)
-  check('fresh token-refresh AMR is not password proof', __test.isRecentPasswordAuth(amr('token_refresh', now - 1_000), now) === false)
-  check('missing/garbage AMR → false', __test.isRecentPasswordAuth(null, now) === false && __test.isRecentPasswordAuth('nope', now) === false)
-  check('far-future password timestamp → false', __test.isRecentPasswordAuth(amr('password', now + 120_000), now) === false)
+  // Guideline 5.1.1(v): the password re-authentication gate is gone for good.
+  check('no password reauth gate is exported or enforced', !('isRecentPasswordAuth' in __test))
 }
 
 // ── Phase C: 12-month purge semantics (predicate simulation) ─────────────────
