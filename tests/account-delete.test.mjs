@@ -35,6 +35,7 @@ process.env.SC_TEST_NO_LISTEN = '1'
 process.env.SUPABASE_URL = ''
 process.env.SUPABASE_ANON_KEY = ''
 process.env.SUPABASE_SERVICE_KEY = ''
+process.env.SUPABASE_SERVICE_ROLE_KEY = ''
 process.env.EVENTS_ENABLED = ''
 const { app, __test } = await import('../server.js')
 __test.setDeletionUserVerifier(async (token) => {
@@ -218,7 +219,7 @@ function scenarioRows() {
       const p = join(dir, f)
       if (statSync(p).isDirectory()) { walk(p); continue }
       if (!/\.(ts|tsx|js|jsx|css|html)$/.test(f)) continue
-      if (readFileSync(p, 'utf8').includes('SUPABASE_SERVICE_KEY')) offenders.push(p)
+      if (/SUPABASE_SERVICE_(ROLE_)?KEY/.test(readFileSync(p, 'utf8'))) offenders.push(p)
     }
   }
   walk('src')

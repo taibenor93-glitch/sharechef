@@ -74,7 +74,7 @@ await sleep(2500)
 offServer.kill()
 
 // ── Phase B: kill switch ON, no service key (validation live, storage impossible) ──
-const onServer = startServer(3102, { EVENTS_ENABLED: 'true', SUPABASE_SERVICE_KEY: '' })
+const onServer = startServer(3102, { EVENTS_ENABLED: 'true', SUPABASE_SERVICE_KEY: '', SUPABASE_SERVICE_ROLE_KEY: '' })
 await sleep(2500)
 
 { const r = await post(3102, goodEvent({ event: 'made_up_event' })); check('unknown event name rejected (400)', r.status === 400) }

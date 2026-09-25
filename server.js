@@ -89,10 +89,17 @@ function deleteRateLimited(key) {
 // Admin client (service-role) — created lazily, server-side only. Independent of
 // the analytics kill switch: deletion must work even with analytics OFF.
 let adminDb = null
+// Service-role key lookup, shared by every server-side admin client. Production
+// (Railway) sets SUPABASE_SERVICE_ROLE_KEY; SUPABASE_SERVICE_KEY is the legacy
+// name. Reading only one of them silently disabled account deletion in prod.
+function serviceRoleKey() {
+  return process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || ''
+}
 function adminClient() {
-  if (!process.env.SUPABASE_SERVICE_KEY || !process.env.SUPABASE_URL) return null
+  const key = serviceRoleKey()
+  if (!key || !process.env.SUPABASE_URL) return null
   if (!adminDb) {
-    adminDb = createSupabaseClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY, {
+    adminDb = createSupabaseClient(process.env.SUPABASE_URL, key, {
       auth: { persistSession: false },
     })
   }
@@ -196,7 +203,7 @@ function realtimeUrlFor(model) {
 
 // ── Phase 1 funnel events ────────────────────────────────────────────────────
 // KILL SWITCH: EVENTS_ENABLED must be exactly 'true' (default OFF).
-// Inserts use the service-role key (SUPABASE_SERVICE_KEY) so the table needs no
+// Inserts use the service-role key (serviceRoleKey()) so the table needs no
 // RLS policies — clients have zero direct access. Server-generated events call
 // recordEvent() directly (no HTTP loopback). All validation is REJECT-based:
 // unknown properties fail the whole request, nothing is silently dropped.
@@ -229,9 +236,10 @@ const seenEventIds = new Set() // best-effort in-memory dedupe; DB unique index 
 
 let eventsDb = null
 function eventsClient() {
-  if (!EVENTS_ENABLED || !process.env.SUPABASE_SERVICE_KEY || !process.env.SUPABASE_URL) return null
+  const key = serviceRoleKey()
+  if (!EVENTS_ENABLED || !key || !process.env.SUPABASE_URL) return null
   if (!eventsDb) {
-    eventsDb = createSupabaseClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY, {
+    eventsDb = createSupabaseClient(process.env.SUPABASE_URL, key, {
       auth: { persistSession: false },
     })
   }
@@ -477,7 +485,7 @@ const FREE_COOKS_PER_MONTH = 3
 
 let cooksDb = null
 function cooksClient() {
-  const key = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY
+  const key = serviceRoleKey()
   if (!process.env.SUPABASE_URL || !key) return null
   if (!cooksDb) {
     cooksDb = createSupabaseClient(process.env.SUPABASE_URL, key, { auth: { persistSession: false } })
