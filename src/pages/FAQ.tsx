@@ -8,7 +8,7 @@ const FAQS: { q: string; a: string }[] = [
   },
   {
     q: 'Is ShareChef free?',
-    a: 'Yes. During our launch, everything is free for our founding families. Paid plans (Pro and Family) are coming later with extra features, and the heart of ShareChef will always have a free plan.',
+    a: 'Yes, there is a free plan with 3 cooks a month. ShareChef Plus gives you unlimited cooks with Micheli for $9.99 a month. On iPhone you can manage or cancel Plus anytime in your App Store account settings.',
   },
   {
     q: 'Do I need to plan meals or find recipes first?',
@@ -16,7 +16,7 @@ const FAQS: { q: string; a: string }[] = [
   },
   {
     q: 'Which devices does it work on?',
-    a: 'iPhone: download ShareChef AI from the App Store. Android and computers: use the web app in your browser, same Micheli, no installation needed.',
+    a: 'iPhone and iPad: download ShareChef AI from the App Store. You can also cook with Micheli in a web browser, no installation needed.',
   },
   {
     q: 'Micheli cannot hear me. What do I do?',
@@ -32,7 +32,7 @@ const FAQS: { q: string; a: string }[] = [
   },
   {
     q: 'How do I share feedback or get help?',
-    a: 'We read everything. Reach out through our social pages, or leave a review on the App Store. Early feedback shapes what we build next.',
+    a: 'Email us at taibenor93@gmail.com. We read everything and reply as fast as we can. You can also leave a review on the App Store. Early feedback shapes what we build next.',
   },
 ]
 
