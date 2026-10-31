@@ -529,6 +529,27 @@ async function monthlyCookCount(userId, guestId) {
   }
 }
 
+// A new connection within this window of the same person's last counted cook is
+// the SAME cook (a dropped first handshake, an app relaunch, a quick restart),
+// never a second one. 19 of 80 cook starts (Oct 30 2026) came within 3 minutes
+// of the previous one: free users were losing 2 of their 3 cooks to one hiccup.
+const SAME_COOK_WINDOW_MS = 10 * 60 * 1000
+
+async function hasRecentCook(userId, guestId) {
+  const db = cooksClient()
+  if (!db || (!userId && !guestId)) return false
+  try {
+    const since = new Date(Date.now() - SAME_COOK_WINDOW_MS).toISOString()
+    let q = db.from('cooks').select('id', { count: 'exact', head: true }).gte('started_at', since)
+    q = userId ? q.eq('user_id', userId) : q.eq('guest_id', guestId)
+    const { count, error } = await q
+    if (error) return false
+    return typeof count === 'number' && count > 0
+  } catch {
+    return false // lookup failure: behave exactly as before (count the cook)
+  }
+}
+
 async function recordCook(userId, guestId) {
   const db = cooksClient()
   if (!db || (!userId && !guestId)) return
@@ -1366,9 +1387,11 @@ wss.on('connection', (browserWs, req) => {
         authInFlight = false
         if (intentionalEnd) { await clearCurrentCook(); return }
         // Free-plan gate: 3 fresh cooks per month, Plus unlimited. Resumes,
-        // reconnects and verified test sessions never charge a cook. Any
+        // reconnects, a new start within SAME_COOK_WINDOW_MS of the last counted
+        // cook, and verified test sessions never charge a cook. Any
         // lookup failure fails open - billing must never break dinner.
-        if (!isTestSession && !isReconnect && !cookState && (user || guestId)) {
+        if (!isTestSession && !isReconnect && !cookState && (user || guestId) &&
+            !(await hasRecentCook(user ? user.id : null, guestId))) {
           const plan = profile && profile.plan === 'plus' ? 'plus' : 'free'
           if (plan !== 'plus') {
             const used = await monthlyCookCount(user ? user.id : null, guestId)
