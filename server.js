@@ -1384,7 +1384,11 @@ wss.on('connection', (browserWs, req) => {
           return
         }
         console.log(`[WS] auth: ${user ? `user ${user.id}` : guestId ? 'guest (tracked)' : 'guest'}${profile ? ' (profile loaded)' : ''}${cookState ? ' (resuming cook)' : ''}${memory ? ' (memory loaded)' : ''}${isReconnect ? ' (reconnect)' : ''}${isTestSession ? ' (TEST MODEL)' : ''}`)
-        authInFlight = false
+        // authInFlight stays true through the cook-gate lookups below. Clearing it
+        // here let the app's first frames (greeting, audio) land during those
+        // awaits, hit the "no auth frame" branch and get sc.auth_required, so a
+        // signed-in user saw "Please sign in" (Nov 1 2026). Cleared right before
+        // startOpenAI() instead; the queued frames replay once the session opens.
         if (intentionalEnd) { await clearCurrentCook(); return }
         // Free-plan gate: 3 fresh cooks per month, Plus unlimited. Resumes,
         // reconnects, a new start within SAME_COOK_WINDOW_MS of the last counted
@@ -1403,6 +1407,7 @@ wss.on('connection', (browserWs, req) => {
           }
           void recordCook(user ? user.id : null, guestId)
         }
+        authInFlight = false
         startOpenAI()
         return // the auth frame itself is never forwarded to OpenAI
       }
