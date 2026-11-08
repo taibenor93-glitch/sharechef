@@ -67,6 +67,9 @@ class FakeWebSocket {
       // client's reconnect budget actually runs out.
       if (globalThis.__socketDead) { this.readyState = FakeWebSocket.CLOSED; this.onclose && this.onclose(); return }
       this.onopen && this.onopen()
+      // __socketFlaky models the Nov 8 2026 failure: the socket opens, then the
+      // server side dies moments later, on every single attempt.
+      if (globalThis.__socketFlaky) setTimeout(() => this.drop(), 50)
     })
   }
   send(d) { this.sent.push(d) }
@@ -214,6 +217,42 @@ async function startedClient() {
   v.disconnect()
   await sleep(10)
   check('...and the mic is still released once the user really ends it', liveTracks() === 0)
+}
+
+// 6. THE NOV 8 2026 LOOP: every reconnect OPENS, then dies a moment later.
+//    The client used to reset its retry budget on every open, so it retried
+//    forever (a user's phone reconnected every ~2s for 16 minutes, Micheli
+//    never spoke, and the cook was still charged). The budget must run out.
+{
+  const { seen } = await startedClient()
+  const before = sockets.length
+  globalThis.__socketFlaky = true
+  sockets[sockets.length - 1].drop()
+  await sleep(6500)                 // well past 800+1600+2400ms of backoff
+  const opened = sockets.length - before
+  globalThis.__socketFlaky = false
+  await sleep(3000)                 // nothing more may be scheduled
+  check('a connection that opens then dies is retried at most 3 times',
+    opened <= 3 && sockets.length - before === opened, `${sockets.length - before} reconnects`)
+  check('...then the user is told the connection dropped', seen.errors.some((m) => /connection dropped/i.test(m)))
+  check('...and the mic is released', liveTracks() === 0, `${liveTracks()} still live`)
+  check('...and the final status is idle', seen.status[seen.status.length - 1] === 'idle', seen.status.join(','))
+}
+
+// 7. A long cook with an occasional drop must NOT run out of retries: once a
+//    reconnected session has stayed up for the stable window, the budget refills.
+{
+  RealtimeVoice.STABLE_MS = 200     // shrink the stable window for the test
+  const { v, seen } = await startedClient()
+  for (let i = 0; i < 5; i++) {     // 5 separate drops, each followed by a healthy stretch
+    sockets[sockets.length - 1].drop()
+    await sleep(1100)               // first backoff (800ms) + time to be stable
+  }
+  check('separate drops in a healthy session each reconnect (budget refills)',
+    !seen.errors.some((m) => /connection dropped/i.test(m)) && liveTracks() === 1,
+    `errors=${seen.errors.join('|')} live=${liveTracks()}`)
+  v.disconnect()
+  RealtimeVoice.STABLE_MS = undefined
 }
 
 // ── Source guarantee: every session-ending path goes through releaseMic() ────

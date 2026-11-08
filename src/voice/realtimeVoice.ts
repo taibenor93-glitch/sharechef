@@ -49,6 +49,12 @@ export class RealtimeVoice {
   private intentionalEnd = false
   private reconnectAttempts = 0
   private reconnectTimer: number | null = null
+  // The retry budget refills only after a connection has stayed up this long.
+  // Refilling on every open (as before Nov 8 2026) meant a socket that opens
+  // and then dies a moment later was retried forever. Overridable in tests.
+  static STABLE_MS: number | undefined = undefined
+  private static readonly DEFAULT_STABLE_MS = 15000
+  private stableTimer: number | null = null
   private hasStartedConversation = false // true once a real greeting/resume has actually fired
   private guestId: string
   // Screen Wake Lock: keeps the display on during an active cook so iOS never
@@ -173,7 +179,13 @@ export class RealtimeVoice {
         ...(EVENTS_ON ? { anonId: getAnonId(), sessionId: getSessionId(), appVersion: APP_VERSION } : {}),
       })
       if (EVENTS_ON) voiceActivity() // session stays alive while cooking starts
-      this.reconnectAttempts = 0
+      // Do NOT refill the retry budget here: an open socket is not yet a working
+      // session. Refill only once this socket has stayed up for the stable window.
+      this.clearStableTimer()
+      this.stableTimer = window.setTimeout(() => {
+        this.stableTimer = null
+        if (this.ws === socket && !this.intentionalEnd) this.reconnectAttempts = 0
+      }, RealtimeVoice.STABLE_MS ?? RealtimeVoice.DEFAULT_STABLE_MS)
       this.cb.onStatus('ready')
       if (isReconnectAttempt) {
         // The server already decided what's true to say — grounded resume, an
@@ -195,6 +207,7 @@ export class RealtimeVoice {
     }
     this.ws.onclose = () => {
       if (this.ws !== socket) return
+      this.clearStableTimer()
       this.isPlayingAudio = false
       if (!this.intentionalEnd && this.reconnectAttempts < 3) {
         // A reconnect is coming in under 3 seconds: unhook the audio graph but
@@ -221,8 +234,16 @@ export class RealtimeVoice {
     }
   }
 
+  private clearStableTimer(): void {
+    if (this.stableTimer !== null) {
+      clearTimeout(this.stableTimer)
+      this.stableTimer = null
+    }
+  }
+
   disconnect(): void {
     this.intentionalEnd = true
+    this.clearStableTimer()
     voiceActivity() // deliberate end is the last activity marker of the session
     this.releaseWakeLock()
     if (this.reconnectTimer !== null) {

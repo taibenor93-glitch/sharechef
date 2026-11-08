@@ -1110,6 +1110,38 @@ function dietaryRules(profile) {
 // ── OpenAI Realtime WebSocket proxy ──────────────────────────────────────────
 const wss = new WebSocketServer({ server, path: '/ws/realtime' })
 
+// Everything the voice session reads from or writes to the outside world, in
+// one place, so tests can run a real session against a fake OpenAI and a fake
+// cooks table (see tests/cook-charge.test.mjs). Production never changes these.
+const voiceDeps = {
+  verifyUser: (token) => verifyUser(token),
+  loadProfile: (token) => loadProfile(token),
+  loadCookState: (token) => loadCookState(token),
+  loadMemory: (token) => loadMemory(token),
+  hasRecentCook: (userId, guestId) => hasRecentCook(userId, guestId),
+  monthlyCookCount: (userId, guestId) => monthlyCookCount(userId, guestId),
+  recordCook: (userId, guestId) => recordCook(userId, guestId),
+  realtimeUrl: (model) => realtimeUrlFor(model),
+}
+const defaultVoiceDeps = { ...voiceDeps }
+
+// Charges one free cook, at most once per SAME_COOK_WINDOW_MS per person.
+// Runs only after the user has actually spoken with Micheli (see the gate in
+// the auth handler). Serialized per person so two sessions that open together
+// cannot both pass the "recent cook?" check and charge twice.
+const cookChargeChains = new Map()
+function chargeCook(userId, guestId) {
+  const key = userId ? `u:${userId}` : `g:${guestId}`
+  const prev = cookChargeChains.get(key) || Promise.resolve()
+  const next = prev.then(async () => {
+    if (await voiceDeps.hasRecentCook(userId, guestId)) return
+    await voiceDeps.recordCook(userId, guestId)
+  }).catch(() => { /* counting is best-effort: billing must never break dinner */ })
+  cookChargeChains.set(key, next)
+  next.finally(() => { if (cookChargeChains.get(key) === next) cookChargeChains.delete(key) })
+  return next
+}
+
 wss.on('connection', (browserWs, req) => {
   console.log(`[WS] Browser connected from ${req.socket.remoteAddress}`)
 
@@ -1131,6 +1163,7 @@ wss.on('connection', (browserWs, req) => {
   let intentionalEnd = false // user tapped "End session" — close the cook, don't resume it
   let clientLanguage = null // explicit language pick sent by the app, if any
   let guestId = null // client-generated id for this guest's resume slot, if any
+  let cookChargePending = false // gate passed; charge the cook once the user actually speaks
   let isReconnect = false // true only when the client confirms this is its automatic drop-recovery path, not a fresh start
   let sessionLanguage = null // set once decided, so a later flush can persist it
   let activeModel = REALTIME_MODEL // overridden to REALTIME_MODEL_TEST only by a verified VOICE_TEST_TOKEN match
@@ -1174,7 +1207,7 @@ wss.on('connection', (browserWs, req) => {
     started = true
     let openaiHeartbeat = null
 
-    openaiWs = new WebSocket(realtimeUrlFor(activeModel), {
+    openaiWs = new WebSocket(voiceDeps.realtimeUrl(activeModel), {
     headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
   })
 
@@ -1290,6 +1323,12 @@ wss.on('connection', (browserWs, req) => {
             line = { who: 'user', text: String(msg.transcript).slice(0, 500) }
           }
           if (line && line.text.trim()) {
+            // A cook is charged only here: the first time the user really speaks
+            // with Micheli. A session that failed, or that nobody used, is free.
+            if (line.who === 'user' && cookChargePending) {
+              cookChargePending = false
+              void chargeCook(user ? user.id : null, guestId)
+            }
             // Phase 1 events: a chef turn counts ONLY here — a completed response
             // with a non-empty transcript. Empty/canceled/malformed responses never land.
             if (line.who === 'chef') evtTurnCount++
@@ -1366,13 +1405,13 @@ wss.on('connection', (browserWs, req) => {
         }
         authInFlight = true
         clearTimeout(authTimer)
-        user = await verifyUser(parsed.token)
+        user = await voiceDeps.verifyUser(parsed.token)
         if (user) {
           authToken = parsed.token
           ;[profile, cookState, memory] = await Promise.all([
-            loadProfile(parsed.token),
-            loadCookState(parsed.token),
-            loadMemory(parsed.token),
+            voiceDeps.loadProfile(parsed.token),
+            voiceDeps.loadCookState(parsed.token),
+            voiceDeps.loadMemory(parsed.token),
           ])
         } else if (!isTestSession) {
           // Sign-in is required. No verified user means no voice session:
@@ -1395,17 +1434,20 @@ wss.on('connection', (browserWs, req) => {
         // cook, and verified test sessions never charge a cook. Any
         // lookup failure fails open - billing must never break dinner.
         if (!isTestSession && !isReconnect && !cookState && (user || guestId) &&
-            !(await hasRecentCook(user ? user.id : null, guestId))) {
+            !(await voiceDeps.hasRecentCook(user ? user.id : null, guestId))) {
           const plan = profile && profile.plan === 'plus' ? 'plus' : 'free'
           if (plan !== 'plus') {
-            const used = await monthlyCookCount(user ? user.id : null, guestId)
+            const used = await voiceDeps.monthlyCookCount(user ? user.id : null, guestId)
             if (used !== null && used >= FREE_COOKS_PER_MONTH) {
               try { browserWs.send(JSON.stringify({ type: 'sc.limit', used, limit: FREE_COOKS_PER_MONTH })) } catch { /* closing anyway */ }
               browserWs.close(1000)
               return
             }
           }
-          void recordCook(user ? user.id : null, guestId)
+          // Not charged yet: only once the user actually talks with Micheli
+          // (see the transcript capture in startOpenAI). Nov 8 2026: a cook
+          // charged here, at connect, was lost to a session that never worked.
+          cookChargePending = true
         }
         authInFlight = false
         startOpenAI()
@@ -1503,4 +1545,7 @@ export const __test = {
     planWriter = null
   },
   resetDeleteRateLimit() { deleteBuckets.clear() },
+  server,
+  setVoiceSeams(seams) { Object.assign(voiceDeps, seams) },
+  resetVoiceSeams() { Object.assign(voiceDeps, defaultVoiceDeps) },
 }
