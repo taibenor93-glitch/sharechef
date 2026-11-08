@@ -436,6 +436,24 @@ async function markMet(token, profile) {
 // briefed on where they were and continues instead of starting over.
 const RESUME_WINDOW_MS = 20 * 60 * 1000 // 20 min — covers a locked phone mid-cook; old builds that can't send "end_session" stop resurrecting dead sessions
 
+// Where cook-session and memory writes go. Swappable in tests only.
+const dataClients = {
+  token: (token) => (SUPABASE_URL && SUPABASE_ANON_KEY && token ? tokenClient(token) : null),
+  service: () => cooksClient(),
+}
+const defaultDataClients = { ...dataClients }
+
+// The client for writes made DURING or AFTER a cook (resume state, memory).
+// Nov 8 2026: these used the token captured when the cook started. Supabase
+// logins last ~1 hour, so on a long cook every later save failed with 401
+// (resume state, End session, memory) and nothing was logged. Identity is
+// verified once at session start; every caller passes that verified user id and
+// every write below sets user_id to it, so the service client writes only that
+// user's own row. Falls back to the user's token if no service key is set.
+function userWriteClient(token) {
+  return dataClients.service() || dataClients.token(token)
+}
+
 function tokenClient(token) {
   return createSupabaseClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     auth: { persistSession: false },
@@ -462,28 +480,32 @@ async function loadCookState(token) {
 
 // A deliberate "End session" closes the cook: empty lines mean nothing to resume.
 async function clearCookState(token, userId) {
-  if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !token || !userId) return
+  const client = userId ? userWriteClient(token) : null
+  if (!client) return
   try {
-    await tokenClient(token).from('cook_sessions').upsert({
+    const { error } = await client.from('cook_sessions').upsert({
       user_id: userId,
       lines: [],
       language: null,
       updated_at: new Date().toISOString(),
     })
+    if (error) console.error('[cook] clear failed:', error.message)
   } catch (err) {
     console.error('[cook] clear failed:', err.message)
   }
 }
 
 async function saveCookState(token, userId, lines, language) {
-  if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !token || !userId || lines.length === 0) return
+  const client = userId && lines.length > 0 ? userWriteClient(token) : null
+  if (!client) return
   try {
-    await tokenClient(token).from('cook_sessions').upsert({
+    const { error } = await client.from('cook_sessions').upsert({
       user_id: userId,
       lines,
       language: language || null,
       updated_at: new Date().toISOString(),
     })
+    if (error) console.error('[cook] save failed:', error.message)
   } catch (err) {
     console.error('[cook] save failed:', err.message)
   }
@@ -767,15 +789,22 @@ async function summarizeAndSaveMemory(token, userId, oldSummary, lines) {
     })
     const summary = completion.choices[0]?.message?.content?.trim()
     if (!summary) return
-    await tokenClient(token).from('micheli_memory').upsert({
-      user_id: userId,
-      summary: summary.slice(0, 1500),
-      updated_at: new Date().toISOString(),
-    })
-    console.log(`[memory] updated for user ${userId}`)
+    await writeMemory(token, userId, summary)
   } catch (err) {
     console.error('[memory] update failed:', err.message)
   }
+}
+
+async function writeMemory(token, userId, summary) {
+  const client = userId ? userWriteClient(token) : null
+  if (!client) return
+  const { error } = await client.from('micheli_memory').upsert({
+    user_id: userId,
+    summary: summary.slice(0, 1500),
+    updated_at: new Date().toISOString(),
+  })
+  if (error) { console.error('[memory] update failed:', error.message); return }
+  console.log(`[memory] updated for user ${userId}`)
 }
 
 // ── Recipe generation ────────────────────────────────────────────────────────
@@ -1547,5 +1576,10 @@ export const __test = {
   resetDeleteRateLimit() { deleteBuckets.clear() },
   server,
   setVoiceSeams(seams) { Object.assign(voiceDeps, seams) },
+  setDataClients(c) { Object.assign(dataClients, c) },
+  resetDataClients() { Object.assign(dataClients, defaultDataClients) },
+  saveCookState,
+  clearCookState,
+  writeMemory,
   resetVoiceSeams() { Object.assign(voiceDeps, defaultVoiceDeps) },
 }
