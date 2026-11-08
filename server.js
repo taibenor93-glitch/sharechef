@@ -572,6 +572,44 @@ async function hasRecentCook(userId, guestId) {
   }
 }
 
+// ---- Free-plan cook time limit ----
+// Free users get FREE_COOK_MAX_MINUTES per cook, with a spoken warning at
+// FREE_COOK_WARN_MINUTES. Plus users and verified test sessions are never
+// limited. The clock belongs to the COOK (it starts when the cook is charged),
+// so reconnecting or resuming never resets it.
+const FREE_COOK_MAX_MINUTES = 25
+const FREE_COOK_WARN_MINUTES = 20
+const FREE_COOK_WARNING_TEXT = 'You have about 5 minutes left on your free cook.'
+const FREE_COOK_FINAL_TEXT =
+  "You've reached the free cook time limit. Please check your stove. Upgrade to ShareChef Plus for unlimited cooking time."
+let cookMinuteMs = 60 * 1000 // one minute; shrunk only by tests
+// Cooks whose final message was already delivered: person -> cook start (ms).
+// A reconnect to one of these gets the upgrade screen, not a second message.
+const timeLimitedCooks = new Map()
+const cookPersonKey = (userId, guestId) => (userId ? `u:${userId}` : `g:${guestId}`)
+
+function limitSpeechInstruction(kind, language) {
+  const text = kind === 'final' ? FREE_COOK_FINAL_TEXT : FREE_COOK_WARNING_TEXT
+  const translate = language === 'English' ? '' : ` Translate it naturally into ${language}.`
+  return `Say this to the user now, in ${language}, warmly and naturally: "${text}"${translate} Say only that, nothing else.`
+}
+
+// Start time (ms) of this person's most recent counted cook, or null.
+async function lastCookStart(userId, guestId) {
+  const db = cooksClient()
+  if (!db || (!userId && !guestId)) return null
+  try {
+    let q = db.from('cooks').select('started_at').order('started_at', { ascending: false }).limit(1)
+    q = userId ? q.eq('user_id', userId) : q.eq('guest_id', guestId)
+    const { data, error } = await q
+    if (error || !Array.isArray(data) || data.length === 0) return null
+    const ms = new Date(data[0].started_at).getTime()
+    return Number.isFinite(ms) ? ms : null
+  } catch {
+    return null
+  }
+}
+
 async function recordCook(userId, guestId) {
   const db = cooksClient()
   if (!db || (!userId && !guestId)) return
@@ -1150,6 +1188,7 @@ const voiceDeps = {
   hasRecentCook: (userId, guestId) => hasRecentCook(userId, guestId),
   monthlyCookCount: (userId, guestId) => monthlyCookCount(userId, guestId),
   recordCook: (userId, guestId) => recordCook(userId, guestId),
+  lastCookStart: (userId, guestId) => lastCookStart(userId, guestId),
   realtimeUrl: (model) => realtimeUrlFor(model),
 }
 const defaultVoiceDeps = { ...voiceDeps }
@@ -1193,6 +1232,18 @@ wss.on('connection', (browserWs, req) => {
   let clientLanguage = null // explicit language pick sent by the app, if any
   let guestId = null // client-generated id for this guest's resume slot, if any
   let cookChargePending = false // gate passed; charge the cook once the user actually speaks
+  // Free cook time limit (see FREE_COOK_MAX_MINUTES).
+  let freeLimited = false // free plan, not a test session
+  let cookStartMs = null // when this cook started; null until known
+  let clockPending = false // start the clock at the user's first words
+  let warnTimer = null
+  let endTimer = null
+  let limitFallbackTimer = null
+  let responseActive = false // OpenAI is generating a response right now
+  let pendingLimitSpeech = null // 'warning' | 'final', waiting for Micheli to finish
+  let limitPhase = null // null | 'final' (message requested) | 'ended' (app told)
+  let finalRequested = false
+  let finalResponseId = null
   let isReconnect = false // true only when the client confirms this is its automatic drop-recovery path, not a fresh start
   let sessionLanguage = null // set once decided, so a later flush can persist it
   let activeModel = REALTIME_MODEL // overridden to REALTIME_MODEL_TEST only by a verified VOICE_TEST_TOKEN match
@@ -1229,6 +1280,61 @@ wss.on('connection', (browserWs, req) => {
       if (authToken && user) return saveCookState(authToken, user.id, lines, sessionLanguage)
       if (guestId) saveGuestCookState(guestId, lines, sessionLanguage)
     })
+  }
+
+  // ── Free cook time limit ──────────────────────────────────────────────────
+  const armCookClock = () => {
+    if (!freeLimited || cookStartMs === null || limitPhase) return
+    const elapsed = Date.now() - cookStartMs
+    const warnIn = FREE_COOK_WARN_MINUTES * cookMinuteMs - elapsed
+    const endIn = FREE_COOK_MAX_MINUTES * cookMinuteMs - elapsed
+    if (endIn <= 0) { requestLimitSpeech('final'); return }
+    if (warnIn > 0) warnTimer = setTimeout(() => requestLimitSpeech('warning'), warnIn)
+    endTimer = setTimeout(() => requestLimitSpeech('final'), endIn)
+  }
+  const requestLimitSpeech = (kind) => {
+    if (limitPhase) return // the final message is already on its way
+    if (kind === 'final') {
+      limitPhase = 'final'
+      clearTimeout(warnTimer)
+      // Nothing the user says reaches Micheli from here on.
+      if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+        openaiWs.send(JSON.stringify({ type: 'input_audio_buffer.clear' }))
+      }
+    }
+    pendingLimitSpeech = kind
+    speakPendingLimit()
+  }
+  const speakPendingLimit = () => {
+    if (!pendingLimitSpeech || responseActive || !sessionReady) return
+    if (!openaiWs || openaiWs.readyState !== WebSocket.OPEN) return
+    const kind = pendingLimitSpeech
+    pendingLimitSpeech = null
+    responseActive = true // ours is starting; never stack a second one on it
+    if (kind === 'final') {
+      finalRequested = true
+      // If OpenAI never finishes the message, end the cook anyway.
+      limitFallbackTimer = setTimeout(finishTimeLimit, 30 * 1000)
+    }
+    openaiWs.send(JSON.stringify({
+      type: 'response.create',
+      response: { instructions: limitSpeechInstruction(kind, sessionLanguage || 'English') },
+    }))
+  }
+  const finishTimeLimit = () => {
+    if (limitPhase === 'ended') return
+    limitPhase = 'ended'
+    clearTimeout(limitFallbackTimer)
+    timeLimitedCooks.set(cookPersonKey(user ? user.id : null, guestId), cookStartMs)
+    if (timeLimitedCooks.size > 5000) timeLimitedCooks.delete(timeLimitedCooks.keys().next().value)
+    // The cook is over: close it on the server too, so it can never be resumed
+    // (even if the app's own "end" never arrives on a flaky connection).
+    intentionalEnd = true
+    void clearCurrentCook()
+    try { browserWs.send(JSON.stringify({ type: 'sc.time_limit', minutes: FREE_COOK_MAX_MINUTES })) } catch { /* closing anyway */ }
+    // Current apps end the cook themselves once Micheli finishes speaking.
+    // Older builds ignore the frame, so close for them after a grace period.
+    limitFallbackTimer = setTimeout(() => { try { browserWs.close(1000) } catch { /* already closed */ } }, 60 * 1000)
   }
 
   const startOpenAI = () => {
@@ -1303,6 +1409,7 @@ wss.on('connection', (browserWs, req) => {
       },
     }))
     sessionReady = true
+    if (cookStartMs !== null) armCookClock()
     for (const msg of pending) {
       if (openaiWs.readyState === WebSocket.OPEN) openaiWs.send(msg)
     }
@@ -1332,6 +1439,26 @@ wss.on('connection', (browserWs, req) => {
   openaiWs.on('message', (data, isBinary) => {
     if (intentionalEnd) return
     if (browserWs.readyState === WebSocket.OPEN) browserWs.send(data, { binary: isBinary })
+    if (freeLimited && !isBinary) {
+      // Track Micheli's responses so the time-limit messages never cut her off
+      // mid-answer, and so the app is told the cook is over only after the
+      // final message has finished.
+      const head = data.toString('utf8', 0, 60)
+      if (head.includes('"response.created"') || head.includes('"response.done"')) {
+        try {
+          const msg = JSON.parse(data.toString('utf8'))
+          const id = msg.response && msg.response.id
+          if (msg.type === 'response.created') {
+            responseActive = true
+            if (finalRequested && !finalResponseId) finalResponseId = id
+          } else if (msg.type === 'response.done') {
+            responseActive = false
+            if (finalResponseId && id === finalResponseId) finishTimeLimit()
+            else if (pendingLimitSpeech) speakPendingLimit()
+          }
+        } catch { /* never let limit tracking break the audio stream */ }
+      }
+    }
     // Capture final transcript lines for resume-after-lock (signed-in users and tracked guests).
     // Only frames that can carry a finished transcript are parsed — audio deltas are not.
     if (user || guestId) {
@@ -1357,6 +1484,12 @@ wss.on('connection', (browserWs, req) => {
             if (line.who === 'user' && cookChargePending) {
               cookChargePending = false
               void chargeCook(user ? user.id : null, guestId)
+            }
+            // The free cook clock starts with the cook itself.
+            if (line.who === 'user' && clockPending) {
+              clockPending = false
+              cookStartMs = Date.now()
+              armCookClock()
             }
             // Phase 1 events: a chef turn counts ONLY here — a completed response
             // with a non-empty transcript. Empty/canceled/malformed responses never land.
@@ -1462,22 +1595,42 @@ wss.on('connection', (browserWs, req) => {
         // reconnects, a new start within SAME_COOK_WINDOW_MS of the last counted
         // cook, and verified test sessions never charge a cook. Any
         // lookup failure fails open - billing must never break dinner.
-        if (!isTestSession && !isReconnect && !cookState && (user || guestId) &&
-            !(await voiceDeps.hasRecentCook(user ? user.id : null, guestId))) {
-          const plan = profile && profile.plan === 'plus' ? 'plus' : 'free'
-          if (plan !== 'plus') {
-            const used = await voiceDeps.monthlyCookCount(user ? user.id : null, guestId)
-            if (used !== null && used >= FREE_COOKS_PER_MONTH) {
-              try { browserWs.send(JSON.stringify({ type: 'sc.limit', used, limit: FREE_COOKS_PER_MONTH })) } catch { /* closing anyway */ }
+        const cookUserId = user ? user.id : null
+        let continuingCook = isReconnect || !!cookState
+        if (!isTestSession && !continuingCook && (user || guestId)) {
+          continuingCook = await voiceDeps.hasRecentCook(cookUserId, guestId)
+          if (!continuingCook) {
+            const plan = profile && profile.plan === 'plus' ? 'plus' : 'free'
+            if (plan !== 'plus') {
+              const used = await voiceDeps.monthlyCookCount(cookUserId, guestId)
+              if (used !== null && used >= FREE_COOKS_PER_MONTH) {
+                try { browserWs.send(JSON.stringify({ type: 'sc.limit', used, limit: FREE_COOKS_PER_MONTH })) } catch { /* closing anyway */ }
+                browserWs.close(1000)
+                return
+              }
+            }
+            // Not charged yet: only once the user actually talks with Micheli
+            // (see the transcript capture in startOpenAI). Nov 8 2026: a cook
+            // charged here, at connect, was lost to a session that never worked.
+            cookChargePending = true
+          }
+        }
+        // Free cook time limit: Plus users and verified test sessions are never limited.
+        freeLimited = !isTestSession && !(profile && profile.plan === 'plus') && !!(user || guestId)
+        if (freeLimited && continuingCook) {
+          // The same cook continues: keep its clock, never reset it.
+          const start = await voiceDeps.lastCookStart(cookUserId, guestId)
+          if (start !== null && Date.now() - start < FREE_COOK_MAX_MINUTES * cookMinuteMs + RESUME_WINDOW_MS) {
+            if (timeLimitedCooks.get(cookPersonKey(cookUserId, guestId)) === start) {
+              // Final message already delivered for this cook: straight to the upgrade screen.
+              try { browserWs.send(JSON.stringify({ type: 'sc.time_limit', minutes: FREE_COOK_MAX_MINUTES })) } catch { /* closing anyway */ }
               browserWs.close(1000)
               return
             }
+            cookStartMs = start
           }
-          // Not charged yet: only once the user actually talks with Micheli
-          // (see the transcript capture in startOpenAI). Nov 8 2026: a cook
-          // charged here, at connect, was lost to a session that never worked.
-          cookChargePending = true
         }
+        clockPending = freeLimited && cookStartMs === null
         authInFlight = false
         startOpenAI()
         return // the auth frame itself is never forwarded to OpenAI
@@ -1489,6 +1642,7 @@ wss.on('connection', (browserWs, req) => {
       return
     }
 
+    if (limitPhase) return // free cook time is up: the mic no longer reaches Micheli
     if (sessionReady && openaiWs && openaiWs.readyState === WebSocket.OPEN) openaiWs.send(text)
     else pending.push(text)
   })
@@ -1527,6 +1681,9 @@ wss.on('connection', (browserWs, req) => {
     }
     clearTimeout(authTimer)
     clearInterval(browserHeartbeat)
+    clearTimeout(warnTimer)
+    clearTimeout(endTimer)
+    clearTimeout(limitFallbackTimer)
     if (!intentionalEnd) {
       flushCookState() // phone locked / app switched — save where they were
     } // else: cook state was already cleared when the end_session frame arrived
@@ -1576,6 +1733,10 @@ export const __test = {
   resetDeleteRateLimit() { deleteBuckets.clear() },
   server,
   setVoiceSeams(seams) { Object.assign(voiceDeps, seams) },
+  FREE_COOK_MAX_MINUTES,
+  FREE_COOK_WARN_MINUTES,
+  setCookTimeScale(ms) { cookMinuteMs = ms },
+  resetCookTimeScale() { cookMinuteMs = 60 * 1000; timeLimitedCooks.clear() },
   setDataClients(c) { Object.assign(dataClients, c) },
   resetDataClients() { Object.assign(dataClients, defaultDataClients) },
   saveCookState,

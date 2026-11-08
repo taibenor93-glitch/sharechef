@@ -69,7 +69,7 @@ export function HomePage() {
   const [status, setStatus] = useState<VoiceStatus>('idle')
   const [lines, setLines] = useState<Line[]>([])
   const [voiceError, setVoiceError] = useState<string | null>(null)
-  const [limitInfo, setLimitInfo] = useState<{ used: number; limit: number } | null>(null)
+  const [limitInfo, setLimitInfo] = useState<{ used: number; limit: number; reason?: 'cooks' | 'time' } | null>(null)
   // What the server says about this session. Null until a session starts.
   const [serverAuth, setServerAuth] = useState<'user' | 'guest' | null>(null)
   const convoRef = useRef<HTMLDivElement | null>(null)
@@ -380,6 +380,7 @@ export function HomePage() {
             <UpgradeSheet
               used={limitInfo.used}
               limit={limitInfo.limit}
+              headline={limitInfo.reason === 'time' ? 'Your free cook time is up' : undefined}
               userId={userId}
               onClose={() => setLimitInfo(null)}
               onUnlocked={() => { setLimitInfo(null); void toggleVoice() }}

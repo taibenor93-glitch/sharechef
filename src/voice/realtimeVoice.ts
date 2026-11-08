@@ -21,7 +21,7 @@ export interface VoiceCallbacks {
   /** What the SERVER decided about this session — the truth, not what the app assumed. */
   onSession?: (info: { auth: 'user' | 'guest'; language: string }) => void
   /** Free plan is out of cooks this month - show the upgrade sheet. */
-  onLimit?: (info: { used: number; limit: number }) => void
+  onLimit?: (info: { used: number; limit: number; reason?: 'cooks' | 'time' }) => void
 }
 
 export class RealtimeVoice {
@@ -55,6 +55,7 @@ export class RealtimeVoice {
   static STABLE_MS: number | undefined = undefined
   private static readonly DEFAULT_STABLE_MS = 15000
   private stableTimer: number | null = null
+  private endingForTimeLimit = false // free cook time is up: finish Micheli's last words, then end
   private hasStartedConversation = false // true once a real greeting/resume has actually fired
   private guestId: string
   // Screen Wake Lock: keeps the display on during an active cook so iOS never
@@ -142,6 +143,7 @@ export class RealtimeVoice {
         : () => Promise.resolve(tokenOrProvider ?? null)
     this.getLanguage = languageProvider ?? null
     this.intentionalEnd = false
+    this.endingForTimeLimit = false
     this.reconnectAttempts = 0
     this.hasStartedConversation = false
     void this.acquireWakeLock()
@@ -209,7 +211,7 @@ export class RealtimeVoice {
       if (this.ws !== socket) return
       this.clearStableTimer()
       this.isPlayingAudio = false
-      if (!this.intentionalEnd && this.reconnectAttempts < 3) {
+      if (!this.intentionalEnd && !this.endingForTimeLimit && this.reconnectAttempts < 3) {
         // A reconnect is coming in under 3 seconds: unhook the audio graph but
         // keep the mic stream warm so the cook resumes without a stutter.
         this.stopListening()
@@ -227,7 +229,7 @@ export class RealtimeVoice {
       // The microphone must go dark whenever the session does.
       this.releaseMic()
       this.releaseWakeLock()
-      if (!this.intentionalEnd) {
+      if (!this.intentionalEnd && !this.endingForTimeLimit) {
         this.cb.onError('The connection dropped. Tap the mic — Micheli will pick up where you were.')
       }
       this.cb.onStatus('idle')
@@ -396,6 +398,22 @@ export class RealtimeVoice {
         this.cb.onStatus('idle')
         this.cb.onLimit?.({ used: Number(msg.used ?? 0), limit: Number(msg.limit ?? 3) })
         break
+      // Free cook time is up. Micheli has just said the final message: let her
+      // finish speaking, then end cleanly (no reconnect) and show the upgrade screen.
+      case 'sc.time_limit': {
+        if (this.endingForTimeLimit) break
+        this.endingForTimeLimit = true
+        this.stopListening()
+        const remaining = this.playbackCtx
+          ? Math.max(0, (this.nextPlayTime - this.playbackCtx.currentTime) * 1000) + 300
+          : 300
+        window.setTimeout(() => {
+          this.disconnect()
+          this.cb.onStatus('idle')
+          this.cb.onLimit?.({ used: 0, limit: 0, reason: 'time' })
+        }, remaining)
+        break
+      }
       // Server requires a signed-in account - end cleanly (no reconnect).
       case 'sc.auth_required':
         this.disconnect()
@@ -435,7 +453,7 @@ export class RealtimeVoice {
           : 150
         setTimeout(() => {
           this.isPlayingAudio = false
-          if (this.playbackCtx) this.startListening()
+          if (this.playbackCtx && !this.endingForTimeLimit) this.startListening()
         }, remaining)
         break
       }
