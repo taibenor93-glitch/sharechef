@@ -255,6 +255,24 @@ async function startedClient() {
   RealtimeVoice.STABLE_MS = undefined
 }
 
+// 8. Free cook time limit: Micheli said the final message. The app lets her
+//    finish, ends the cook cleanly (no reconnect), releases the mic and shows
+//    the upgrade screen for the time limit.
+{
+  const { seen, socket } = await startedClient()
+  const before = sockets.length
+  socket.emit({ type: 'sc.time_limit', minutes: 25 })
+  await sleep(1500)
+  socket.drop()                     // the server closing afterwards must not trigger a reconnect
+  await sleep(1500)
+  check('time limit: the upgrade screen opens for the time limit', seen.limit && seen.limit.reason === 'time', JSON.stringify(seen.limit))
+  check('time limit: no reconnect after the cook ends', sockets.length === before, `${sockets.length - before} reconnects`)
+  check('time limit: the mic is released', liveTracks() === 0, `${liveTracks()} still live`)
+  check('time limit: no "connection dropped" error', !seen.errors.some((m) => /connection dropped/i.test(m)), seen.errors.join('|'))
+  check('time limit: the cook is closed on the server (end_session sent)',
+    socket.sent.some((d) => typeof d === 'string' && d.includes('"end_session"')))
+}
+
 // ── Source guarantee: every session-ending path goes through releaseMic() ────
 {
   const src = readFileSync(new URL('../src/voice/realtimeVoice.ts', import.meta.url), 'utf8')
