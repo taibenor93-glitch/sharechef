@@ -144,4 +144,7 @@ end;
 $$;
 
 revoke all on function public.cares_redeem_code(text) from public;
+-- Supabase grants new functions to anon directly, so revoke that too: only
+-- signed-in parents may redeem a code.
+revoke execute on function public.cares_redeem_code(text) from anon;
 grant execute on function public.cares_redeem_code(text) to authenticated;
