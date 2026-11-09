@@ -9,6 +9,7 @@ import {
   suspendAnalyticsForAccountDeletion,
 } from '../lib/events'
 import { resetIdentity } from '../lib/session'
+import { MicheliCares } from '../components/MicheliCares'
 
 export function PreferencesPage() {
   const { userId } = useAuth()
@@ -216,6 +217,8 @@ export function PreferencesPage() {
           </>
         )}
       </div>
+
+      <MicheliCares userId={userId} />
 
       <div className="card stack" style={{ borderColor: 'rgba(220, 80, 80, 0.45)' }}>
         <div className="field">

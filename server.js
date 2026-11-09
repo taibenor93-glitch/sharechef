@@ -7,6 +7,14 @@ import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 import OpenAI from 'openai'
 import { createClient as createSupabaseClient } from '@supabase/supabase-js'
+import {
+  HEAT_AND_SAFETY_PROMPT,
+  CARES_TOOL,
+  caresInstruction,
+  createCares,
+  createApnsSender,
+  apnsConfigFromEnv,
+} from './micheli-cares.js'
 
 dotenv.config()
 
@@ -1136,6 +1144,48 @@ function dietaryRules(profile) {
   )
 }
 
+// ── Micheli Cares (parent check-ins) ─────────────────────────────────────────
+// Links and push addresses are read with the service role: the teen's session
+// must reach the PARENT's rows, which RLS rightly hides from the teen.
+// Before the migration runs, the tables are missing and every lookup quietly
+// returns nothing, so the feature stays off and nothing else is affected.
+let caresTablesMissingLogged = false
+function caresTableMissing(error) {
+  const missing = /does not exist|schema cache|PGRST205|42P01/i.test(`${error?.code || ''} ${error?.message || ''}`)
+  if (missing && !caresTablesMissingLogged) {
+    caresTablesMissingLogged = true
+    console.warn('[cares] Micheli Cares tables not found yet (migration not run); feature off.')
+  }
+  return missing
+}
+async function loadCaresParents(teenId) {
+  const db = adminClient()
+  if (!db || !teenId) return []
+  const { data, error } = await db.from('cares_links').select('parent_id, teen_name').eq('teen_id', teenId)
+  if (error) {
+    if (!caresTableMissing(error)) console.error('[cares] links lookup failed:', error.message)
+    return []
+  }
+  return (data || []).map((r) => ({ parentId: r.parent_id, teenName: r.teen_name }))
+}
+async function loadCaresTokens(parentIds) {
+  const db = adminClient()
+  if (!db || !parentIds || parentIds.length === 0) return []
+  const { data, error } = await db.from('cares_push_tokens').select('user_id, token').in('user_id', parentIds)
+  if (error) {
+    if (caresTableMissing(error)) return []
+    throw new Error(error.message)
+  }
+  return (data || []).map((r) => ({ userId: r.user_id, token: r.token }))
+}
+const apnsConfig = apnsConfigFromEnv(process.env)
+if (!apnsConfig) console.warn('[cares] APNS_KEY_ID / APNS_TEAM_ID / APNS_KEY_P8 not set; Micheli Cares check-ins will not send.')
+const cares = createCares({
+  loadParents: (teenId) => voiceDeps.loadCaresParents(teenId),
+  loadTokens: (parentIds) => loadCaresTokens(parentIds),
+  send: apnsConfig ? createApnsSender(apnsConfig) : null,
+})
+
 // ── OpenAI Realtime WebSocket proxy ──────────────────────────────────────────
 const wss = new WebSocketServer({ server, path: '/ws/realtime' })
 
@@ -1151,6 +1201,7 @@ const voiceDeps = {
   monthlyCookCount: (userId, guestId) => monthlyCookCount(userId, guestId),
   recordCook: (userId, guestId) => recordCook(userId, guestId),
   realtimeUrl: (model) => realtimeUrlFor(model),
+  loadCaresParents: (teenId) => loadCaresParents(teenId),
 }
 const defaultVoiceDeps = { ...voiceDeps }
 
@@ -1197,6 +1248,9 @@ wss.on('connection', (browserWs, req) => {
   let sessionLanguage = null // set once decided, so a later flush can persist it
   let activeModel = REALTIME_MODEL // overridden to REALTIME_MODEL_TEST only by a verified VOICE_TEST_TOKEN match
   let isTestSession = false
+  let caresOn = false // this signed-in cook is linked to a parent through Micheli Cares
+  let caresStoveStillOn = false // a recent session ended with the stove reported "on"
+  let caresResponsePending = false // we asked Micheli to speak after a check-in
   // Phase 1 events: identity comes from the auth frame of 1.6+ clients; older
   // clients send none and produce no events. Turns count only non-empty,
   // completed chef responses (incremented where the transcript is captured).
@@ -1260,10 +1314,14 @@ wss.on('connection', (browserWs, req) => {
       session: {
         type: 'realtime',
         output_modalities: ['audio'],
+        // Micheli Cares: the stove check-in tool exists only for linked teens.
+        ...(caresOn ? { tools: [CARES_TOOL], tool_choice: 'auto' } : {}),
         instructions:
           MICHELI_PROMPT +
+          HEAT_AND_SAFETY_PROMPT +
           languageInstruction(sessionLanguage) +
           dietaryRules(profile) +
+          (caresOn ? caresInstruction(caresStoveStillOn) : '') +
           memoryInstruction(memory) +
           (cookState
             ? resumeInstruction(cookState)
@@ -1329,8 +1387,54 @@ wss.on('connection', (browserWs, req) => {
     }, 25000)
   })
 
+  // Micheli Cares: Micheli asked to send a stove check-in. Send it, hand her
+  // the result, and let her answer out loud.
+  const handleStoveCall = async (call) => {
+    let status = null
+    try { status = JSON.parse(call.arguments || '{}').status } catch { /* bad args → refused below */ }
+    let output
+    try {
+      output = await cares.checkIn(user.id, status)
+    } catch (err) {
+      console.error('[cares] check-in failed:', err.message)
+      output = 'The check-in could not reach their parent right now. Do not tell the cook it was sent; keep cooking safely.'
+    }
+    if (intentionalEnd || !openaiWs || openaiWs.readyState !== WebSocket.OPEN) return
+    openaiWs.send(JSON.stringify({
+      type: 'conversation.item.create',
+      item: { type: 'function_call_output', call_id: call.call_id, output },
+    }))
+    caresResponsePending = true
+    openaiWs.send(JSON.stringify({ type: 'response.create' }))
+  }
+
   openaiWs.on('message', (data, isBinary) => {
     if (intentionalEnd) return
+    if (caresOn && user && !isBinary) {
+      const head = data.toString('utf8', 0, 200)
+      if (head.includes('"response.done"')) {
+        try {
+          const msg = JSON.parse(data.toString('utf8'))
+          const calls = (msg.response?.output || []).filter(
+            (item) => item && item.type === 'function_call' && item.name === CARES_TOOL.name && item.call_id
+          )
+          for (const call of calls) void handleStoveCall(call)
+        } catch { /* never let check-ins break the audio stream */ }
+      } else if (caresResponsePending && head.includes('"error"')) {
+        // If the cook was already talking when we asked Micheli to reply, OpenAI
+        // says a response is already active. That is harmless (she answers on
+        // her next turn), so keep it from showing the cook an error.
+        try {
+          const msg = JSON.parse(data.toString('utf8'))
+          if (msg.type === 'error' && msg.error?.code === 'conversation_already_has_active_response') {
+            caresResponsePending = false
+            return
+          }
+        } catch { /* not ours; forward as usual */ }
+      } else if (head.includes('"response.created"')) {
+        caresResponsePending = false
+      }
+    }
     if (browserWs.readyState === WebSocket.OPEN) browserWs.send(data, { binary: isBinary })
     // Capture final transcript lines for resume-after-lock (signed-in users and tracked guests).
     // Only frames that can carry a finished transcript are parsed — audio deltas are not.
@@ -1437,11 +1541,15 @@ wss.on('connection', (browserWs, req) => {
         user = await voiceDeps.verifyUser(parsed.token)
         if (user) {
           authToken = parsed.token
-          ;[profile, cookState, memory] = await Promise.all([
+          let caresParents = []
+          ;[profile, cookState, memory, caresParents] = await Promise.all([
             voiceDeps.loadProfile(parsed.token),
             voiceDeps.loadCookState(parsed.token),
             voiceDeps.loadMemory(parsed.token),
+            Promise.resolve().then(() => voiceDeps.loadCaresParents(user.id)).catch(() => []),
           ])
+          caresOn = Array.isArray(caresParents) && caresParents.length > 0
+          if (caresOn) caresStoveStillOn = cares.sessionStarted(user.id) === 'resumed-on'
         } else if (!isTestSession) {
           // Sign-in is required. No verified user means no voice session:
           // tell the app, then close before any OpenAI cost is incurred.
@@ -1527,6 +1635,9 @@ wss.on('connection', (browserWs, req) => {
     }
     clearTimeout(authTimer)
     clearInterval(browserHeartbeat)
+    // Micheli Cares safety net: last word was "stove on" → parent hears in 5 min
+    // unless the teen reports "off" first.
+    if (caresOn && user) cares.sessionEnded(user.id)
     if (!intentionalEnd) {
       flushCookState() // phone locked / app switched — save where they were
     } // else: cook state was already cleared when the end_session frame arrived
