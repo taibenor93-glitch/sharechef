@@ -11,6 +11,7 @@ import {
   cleanName,
   buildApnsJwt,
   normalizeP8,
+  p8Problem,
   apnsConfigFromEnv,
   createApnsSender,
   createCares,
@@ -72,6 +73,21 @@ const quietLog = { warn() {}, error() {} }
   check('jwt signature verifies (raw 64-byte form)', ok && Buffer.from(s, 'base64url').length === 64)
   const escaped = p8.replace(/\n/g, '\\n')
   check('p8 stored with \\n still works', normalizeP8(escaped) === p8.trim())
+  // A settings box that turns line breaks into spaces, or wraps the key in quotes.
+  const spaced = p8.trim().replace(/\n/g, ' ')
+  check('p8 with spaces for line breaks still signs', (() => {
+    try { return buildApnsJwt({ keyId: 'K', teamId: 'T', keyP8: spaced, nowSec: 1 }).split('.').length === 3 } catch { return false }
+  })())
+  check('p8 wrapped in quotes still signs', (() => {
+    try { return buildApnsJwt({ keyId: 'K', teamId: 'T', keyP8: `"${p8.trim()}"`, nowSec: 1 }).split('.').length === 3 } catch { return false }
+  })())
+  const bodyOnly = p8.trim().split('\n').slice(1, -1).join('')
+  check('p8 with only the middle pasted still signs', (() => {
+    try { return buildApnsJwt({ keyId: 'K', teamId: 'T', keyP8: bodyOnly, nowSec: 1 }).split('.').length === 3 } catch { return false }
+  })())
+  check('a good key reports no problem', p8Problem(p8) === null && p8Problem(spaced) === null)
+  const junk = p8Problem('${{APNS_KEY_P8APNS_KEY_P8}}')
+  check('a value that is not a key is reported without revealing it', typeof junk === 'string' && junk.includes('27 characters') && !junk.includes('APNS_KEY_P8APNS'))
   check('config needs all three keys', apnsConfigFromEnv({ APNS_KEY_ID: 'a', APNS_TEAM_ID: 'b' }) === null)
   const cfg = apnsConfigFromEnv({ APNS_KEY_ID: ' a ', APNS_TEAM_ID: 'b', APNS_KEY_P8: p8 })
   check('config trims and defaults bundle id', cfg.keyId === 'a' && cfg.bundleId === 'com.sharechef.app')

@@ -12,6 +12,7 @@ import {
   CARES_TOOL,
   caresInstruction,
   createCares,
+  p8Problem,
   createApnsSender,
   apnsConfigFromEnv,
 } from './micheli-cares.js'
@@ -1218,6 +1219,11 @@ async function loadCaresTokens(parentIds) {
 }
 const apnsConfig = apnsConfigFromEnv(process.env)
 if (!apnsConfig) console.warn('[cares] APNS_KEY_ID / APNS_TEAM_ID / APNS_KEY_P8 not set; Micheli Cares check-ins will not send.')
+else {
+  const keyProblem = p8Problem(apnsConfig.keyP8)
+  if (keyProblem) console.error(`[cares] ${keyProblem}`)
+  else console.log('[cares] Apple push key loaded; check-ins can send.')
+}
 const cares = createCares({
   loadParents: (teenId) => voiceDeps.loadCaresParents(teenId),
   loadTokens: (parentIds) => loadCaresTokens(parentIds),

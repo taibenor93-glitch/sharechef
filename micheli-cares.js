@@ -85,9 +85,40 @@ function b64url(input) {
   return Buffer.from(input).toString('base64').replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_')
 }
 
-// Railway may store the .p8 text with literal "\n" instead of line breaks.
+// A settings box can mangle the .p8 text: line breaks become spaces or literal
+// "\n", or quotes get wrapped around it. Rebuild a clean key from whatever is
+// there: keep the BEGIN/END lines, strip everything that is not key text, and
+// re-wrap at 64 characters. Text that is not a key comes back unchanged, so
+// the failure is reported instead of hidden.
 export function normalizeP8(raw) {
-  return String(raw || '').replace(/\\n/g, '\n').trim()
+  const text = String(raw || '').replace(/\\n/g, '\n').replace(/\r/g, '').trim().replace(/^["']+|["']+$/g, '').trim()
+  const m = text.match(/-----BEGIN ((?:EC )?)PRIVATE KEY-----([\s\S]*?)-----END \1PRIVATE KEY-----/)
+  let label = 'PRIVATE KEY'
+  let body
+  if (m) {
+    label = `${m[1]}PRIVATE KEY`
+    body = m[2]
+  } else if (/^[A-Za-z0-9+/=\s]{100,}$/.test(text)) {
+    body = text // only the middle of the file was pasted
+  } else {
+    return text
+  }
+  const b64 = body.replace(/[^A-Za-z0-9+/=]/g, '')
+  const lines = b64.match(/.{1,64}/g) || []
+  return `-----BEGIN ${label}-----\n${lines.join('\n')}\n-----END ${label}-----`
+}
+
+// Says what is wrong with the saved key WITHOUT revealing it, for the logs.
+// Returns null when the key reads fine.
+export function p8Problem(raw) {
+  const text = String(raw || '')
+  try {
+    crypto.createPrivateKey(normalizeP8(text))
+    return null
+  } catch {
+    const has = (s) => (text.includes(s) ? 'yes' : 'no')
+    return `APNS_KEY_P8 is not a readable Apple key (${text.trim().length} characters, BEGIN line: ${has('BEGIN')}, END line: ${has('END')}). Paste the whole text of the AuthKey .p8 file as its value.`
+  }
 }
 
 export function buildApnsJwt({ keyId, teamId, keyP8, nowSec }) {
