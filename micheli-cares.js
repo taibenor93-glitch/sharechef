@@ -195,11 +195,13 @@ export function createApnsSender(cfg, { post = http2Post, now = () => Date.now()
     // App Store / TestFlight phones use Apple's production server; phones running
     // a build straight from Xcode use the sandbox. The token says which, so try
     // production first and fall back once if Apple says the token is not its.
+    let via = 'production'
     let res = await post('api.push.apple.com', path, headers, payload)
     if (res.status === 400 && res.reason === 'BadDeviceToken') {
+      via = 'sandbox'
       res = await post('api.sandbox.push.apple.com', path, headers, payload)
     }
-    return { ok: res.status === 200, status: res.status, reason: res.reason }
+    return { ok: res.status === 200, status: res.status, reason: res.reason, via }
   }
 }
 
@@ -248,7 +250,11 @@ export function createCares({
       } catch (err) {
         res = { ok: false, status: 0, reason: err.message } // e.g. a mistyped APNS_KEY_P8
       }
-      if (res.ok) sent++
+      if (res.ok) {
+        sent++
+        // No ids or tokens: just that Apple took it, and through which door.
+        if (typeof log.log === 'function') log.log(`[cares] Apple accepted a "${kind}" check-in (${res.via || 'apple'})`)
+      }
       // Ids and tokens stay out of the logs; Apple's reason is enough to debug.
       else log.error(`[cares] Apple refused a check-in: ${res.status} ${res.reason || ''}`.trim())
     }))
