@@ -68,7 +68,16 @@ export function MicheliCares({ userId }: { userId: string }) {
   }
 
   const onConnect = async () => {
-    if (!isGuardian || busy) return
+    if (busy) return
+    // Say what is missing instead of a button that silently does nothing.
+    if (codeInput.trim().length < 6) {
+      setMessage({ kind: 'error', text: 'Type the 6-character code your teen reads to you.' })
+      return
+    }
+    if (!isGuardian) {
+      setMessage({ kind: 'error', text: 'Check the box to confirm you’re this teen’s parent or guardian.' })
+      return
+    }
     setBusy(true)
     setMessage(null)
     try {
@@ -94,7 +103,16 @@ export function MicheliCares({ userId }: { userId: string }) {
   }
 
   const onMakeCode = async () => {
-    if (!isThirteen || busy) return
+    if (busy) return
+    // Say what is missing instead of a button that silently does nothing.
+    if (!teenName.trim()) {
+      setMessage({ kind: 'error', text: 'Type your first name first.' })
+      return
+    }
+    if (!isThirteen) {
+      setMessage({ kind: 'error', text: 'Check the box to confirm you’re 13 or older.' })
+      return
+    }
     setBusy(true)
     setMessage(null)
     try {
@@ -195,7 +213,7 @@ export function MicheliCares({ userId }: { userId: string }) {
               I’m this teen’s parent or guardian.
             </label>
             <div style={{ display: 'flex', gap: 10 }}>
-              <button type="button" className="btn btn-primary" onClick={onConnect} disabled={busy || !isGuardian || codeInput.trim().length < 6}>
+              <button type="button" className="btn btn-primary" onClick={onConnect} disabled={busy}>
                 {busy ? 'Connecting…' : 'Connect'}
               </button>
               <button type="button" className="btn btn-ghost" onClick={() => setRole('none')} disabled={busy}>Cancel</button>
@@ -232,7 +250,7 @@ export function MicheliCares({ userId }: { userId: string }) {
               I’m 13 or older.
             </label>
             <div style={{ display: 'flex', gap: 10 }}>
-              <button type="button" className="btn btn-primary" onClick={onMakeCode} disabled={busy || !isThirteen || !teenName.trim()}>
+              <button type="button" className="btn btn-primary" onClick={onMakeCode} disabled={busy}>
                 {busy ? 'Making your code…' : 'Get my code'}
               </button>
               <button type="button" className="btn btn-ghost" onClick={() => setRole('none')} disabled={busy}>Cancel</button>
