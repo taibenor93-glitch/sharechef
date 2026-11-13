@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth, setGuest } from '../hooks/useAuth'
 import { supabase } from '../lib/supabaseClient'
 import { RealtimeVoice } from '../voice/realtimeVoice'
+import { noteFinishedCook } from '../lib/appReview'
 import type { VoiceStatus } from '../voice/realtimeVoice'
 import { generateRecipe, recipeFromCook } from '../lib/recipeApi'
 import type { GeneratedRecipe } from '../lib/recipeApi'
@@ -271,6 +272,8 @@ export function HomePage() {
       setPhotoStep('ask')
       await saveRecipe(r, userId)
       recipeCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      // 3rd finished cook with a saved recipe: ask for an App Store rating (once).
+      void noteFinishedCook()
     } catch {
       setCookWrapUp('error')
     }
