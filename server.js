@@ -223,6 +223,8 @@ const REALTIME_MODEL = 'gpt-realtime'
 const REALTIME_VOICE = 'shimmer'
 // Test sessions only (never real users) — gated by VOICE_TEST_TOKEN below.
 const REALTIME_MODEL_TEST = 'gpt-realtime-2.1-mini'
+// Free users (not Plus, not test sessions) use the cheaper mini model. Ratified by Tai 2026-11-13.
+const REALTIME_MODEL_FREE = 'gpt-realtime-2.1-mini'
 function realtimeUrlFor(model) {
   return `wss://api.openai.com/v1/realtime?model=${model}`
 }
@@ -1737,6 +1739,7 @@ wss.on('connection', (browserWs, req) => {
         }
         // Free cook time limit: Plus users and verified test sessions are never limited.
         freeLimited = !isTestSession && !(profile && profile.plan === 'plus') && !!(user || guestId)
+        if (freeLimited) activeModel = REALTIME_MODEL_FREE
         if (freeLimited && continuingCook) {
           // The same cook continues: keep its clock, never reset it.
           const start = await voiceDeps.lastCookStart(cookUserId, guestId)
