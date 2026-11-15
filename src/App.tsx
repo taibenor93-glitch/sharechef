@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { useAuth } from './hooks/useAuth'
 import { useDeepLinks } from './hooks/useDeepLinks'
+import { useSiri } from './hooks/useSiri'
 import { startAnalyticsSession, foregroundBoundary, linkIdentityOnce, setAuthContextProvider } from './lib/events'
 import { supabase } from './lib/supabaseClient'
 import { Layout } from './components/Layout'
@@ -24,6 +25,10 @@ export default function App() {
   // that should land on a specific screen. Allowed paths live in
   // src/lib/deepLink.ts; anything else falls back to home.
   useDeepLinks()
+
+  // "Hey Siri, cook with Micheli" and "ask Micheli what I can make".
+  // See src/lib/siri.ts; the request is carried out on the home screen.
+  useSiri()
 
   // Phase 1 events (no-ops unless VITE_EVENTS_ENABLED='true'): cold launch
   // always starts a new session; foreground return rotates only after the

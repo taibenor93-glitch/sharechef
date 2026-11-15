@@ -16,6 +16,13 @@ import { syncPlusWithServer } from '../lib/purchases'
 import { canUseRecordingMode } from '../lib/recordingMode'
 import { ScreenRecorder, canRecordInApp } from '../lib/screenRecorder'
 import { startTape, stopTape, isTaping } from '../lib/soundTape'
+import { siriInbox } from '../lib/siri'
+import type { SiriAction } from '../lib/siri'
+
+// "Hey Siri, cook with Micheli" starts a cook with no tap. iOS only lets sound
+// start without a tap in some setups; if it has not started in this long, the
+// app stays on the home screen and the user taps the orb as usual.
+const SIRI_AUDIO_UNLOCK_MS = 1500
 
 type Line = { role: 'user' | 'chef'; text: string }
 
@@ -180,6 +187,47 @@ export function HomePage() {
   }
   const removeIngredient = (i: string) =>
     setIngredients((prev) => prev.filter((x) => x !== i))
+
+  // ── Siri ──
+  // Requests are collected app-wide (hooks/useSiri.ts) and carried out here.
+  // This screen only exists for a signed-in user, so "signed-in users only"
+  // needs no check of its own: a signed-out user is on the sign-in page, and
+  // the request expires unused (SIRI_ACTION_TTL_MS).
+  const statusRef = useRef(status)
+  statusRef.current = status
+
+  const startCookFromSiri = async () => {
+    const v = voiceRef.current
+    // Already cooking, or already starting: Siri must never end a cook.
+    if (!v || statusRef.current !== 'idle' || startingRef.current) return
+    const unlocked = await Promise.race([
+      v.unlockAudio().then(() => true, () => false),
+      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), SIRI_AUDIO_UNLOCK_MS)),
+    ])
+    if (!unlocked || statusRef.current !== 'idle' || startingRef.current) return
+    await toggleVoice()
+  }
+
+  // Always the latest closure, so the one-time subscription below never acts
+  // on stale state.
+  const onSiriRef = useRef<(action: SiriAction) => void>(() => {})
+  onSiriRef.current = (action) => {
+    if (action.kind === 'make') {
+      // A fresh question replaces the list rather than adding to an old one.
+      setIngredients(action.ingredients)
+      return
+    }
+    void startCookFromSiri()
+  }
+
+  useEffect(() => {
+    const collect = () => {
+      const action = siriInbox.take()
+      if (action) onSiriRef.current(action)
+    }
+    collect() // a request made before this screen existed (cold start)
+    return siriInbox.subscribe(collect)
+  }, [])
 
   const onGenerate = async () => {
     if (ingredients.length === 0) return
