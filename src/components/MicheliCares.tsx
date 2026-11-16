@@ -19,6 +19,10 @@ export function MicheliCares({ userId }: { userId: string }) {
   const [role, setRole] = useState<'none' | 'parent' | 'teen'>('none')
   const [message, setMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null)
   const [busy, setBusy] = useState(false)
+  // Remove asks first. One tap on Remove only opens the question; a second
+  // tap in the same spot lands on Cancel, so a stray double tap removes nothing.
+  const [confirming, setConfirming] = useState<string | null>(null)
+  const linkKey = (l: CaresLink) => `${l.parentId}:${l.teenId}`
 
   // Parent side
   const [codeInput, setCodeInput] = useState('')
@@ -125,6 +129,7 @@ export function MicheliCares({ userId }: { userId: string }) {
   }
 
   const onRemove = async (link: CaresLink) => {
+    setConfirming(null)
     setBusy(true)
     setMessage(null)
     try {
@@ -152,8 +157,20 @@ export function MicheliCares({ userId }: { userId: string }) {
         <div className="stack" style={{ gap: 6 }}>
           {asParent.map((l) => (
             <div key={l.teenId} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-              <span>You get check-ins when <strong>{l.teenName}</strong> cooks.</span>
-              <button type="button" className="btn btn-ghost" onClick={() => onRemove(l)} disabled={busy}>Remove</button>
+              {confirming === linkKey(l) ? (
+                <>
+                  <span>Stop check-ins for <strong>{l.teenName}</strong>?</span>
+                  <span style={{ display: 'flex', gap: 8 }}>
+                    <button type="button" className="btn btn-ghost" onClick={() => onRemove(l)} disabled={busy}>Yes, stop</button>
+                    <button type="button" className="btn btn-primary" onClick={() => setConfirming(null)} disabled={busy}>Cancel</button>
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span>You get check-ins when <strong>{l.teenName}</strong> cooks.</span>
+                  <button type="button" className="btn btn-ghost" onClick={() => { setConfirming(linkKey(l)); setMessage(null) }} disabled={busy}>Remove</button>
+                </>
+              )}
             </div>
           ))}
           {phoneOn === 'denied' && (
@@ -173,8 +190,20 @@ export function MicheliCares({ userId }: { userId: string }) {
         <div className="stack" style={{ gap: 6 }}>
           {asTeen.map((l) => (
             <div key={l.parentId} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-              <span>Your parent gets a check-in when you cook.</span>
-              <button type="button" className="btn btn-ghost" onClick={() => onRemove(l)} disabled={busy}>Remove</button>
+              {confirming === linkKey(l) ? (
+                <>
+                  <span>Stop sending check-ins to your parent?</span>
+                  <span style={{ display: 'flex', gap: 8 }}>
+                    <button type="button" className="btn btn-ghost" onClick={() => onRemove(l)} disabled={busy}>Yes, stop</button>
+                    <button type="button" className="btn btn-primary" onClick={() => setConfirming(null)} disabled={busy}>Cancel</button>
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span>Your parent gets a check-in when you cook.</span>
+                  <button type="button" className="btn btn-ghost" onClick={() => { setConfirming(linkKey(l)); setMessage(null) }} disabled={busy}>Remove</button>
+                </>
+              )}
             </div>
           ))}
         </div>
