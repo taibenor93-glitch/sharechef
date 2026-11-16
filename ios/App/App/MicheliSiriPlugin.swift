@@ -22,13 +22,14 @@ final class MicheliSiriInbox {
     private static let lifetime: TimeInterval = 60
 
     private let lock = NSLock()
-    private var pending: (action: String, ingredients: String, at: Date)?
+    private var pending: (action: String, payload: String, at: Date)?
 
     private init() {}
 
-    func put(action: String, ingredients: String = "") {
+    /// `payload` is the spoken ingredients for "make", or a recipe id for "recipe".
+    func put(action: String, payload: String = "") {
         lock.lock()
-        pending = (action, ingredients, Date())
+        pending = (action, payload, Date())
         lock.unlock()
         DispatchQueue.main.async {
             NotificationCenter.default.post(name: .scSiriAction, object: nil)
@@ -36,13 +37,13 @@ final class MicheliSiriInbox {
     }
 
     /// Returns the waiting request once, then forgets it.
-    func take() -> (action: String, ingredients: String)? {
+    func take() -> (action: String, payload: String)? {
         lock.lock()
         defer { lock.unlock() }
         guard let request = pending else { return nil }
         pending = nil
         guard Date().timeIntervalSince(request.at) <= MicheliSiriInbox.lifetime else { return nil }
-        return (request.action, request.ingredients)
+        return (request.action, request.payload)
     }
 }
 
@@ -64,12 +65,14 @@ public class MicheliSiriPlugin: CAPPlugin, CAPBridgedPlugin {
         notifyListeners("siriAction", data: [:])
     }
 
-    // { action: "cook" } | { action: "make", ingredients: "chicken and rice" } | {}
+    // { action: "cook" } | { action: "make", ingredients: "chicken and rice" }
+    // | { action: "recipe", recipeId: "<uuid>" } | {}
     @objc func takePending(_ call: CAPPluginCall) {
         guard let request = MicheliSiriInbox.shared.take() else {
             call.resolve([:])
             return
         }
-        call.resolve(["action": request.action, "ingredients": request.ingredients])
+        let key = request.action == "recipe" ? "recipeId" : "ingredients"
+        call.resolve(["action": request.action, key: request.payload])
     }
 }

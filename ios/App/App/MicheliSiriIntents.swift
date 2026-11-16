@@ -45,7 +45,7 @@ struct WhatCanIMakeIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult {
-        MicheliSiriInbox.shared.put(action: "make", ingredients: ingredients)
+        MicheliSiriInbox.shared.put(action: "make", payload: ingredients)
         return .result()
     }
 }

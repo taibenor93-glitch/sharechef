@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import { useAuth } from './hooks/useAuth'
 import { useDeepLinks } from './hooks/useDeepLinks'
 import { useSiri } from './hooks/useSiri'
+import { useRecipeIndex } from './hooks/useRecipeIndex'
 import { startAnalyticsSession, foregroundBoundary, linkIdentityOnce, setAuthContextProvider } from './lib/events'
 import { supabase } from './lib/supabaseClient'
 import { Layout } from './components/Layout'
@@ -29,6 +30,12 @@ export default function App() {
   // "Hey Siri, cook with Micheli" and "ask Micheli what I can make".
   // See src/lib/siri.ts; the request is carried out on the home screen.
   useSiri()
+
+  // Siri AI (iOS 27.3+): keeps the iPhone's copy of the signed-in user's saved
+  // recipes current so Siri can find them. Emptied on sign-out.
+  // `undefined` while sign-in is still loading: an unknown account must never
+  // be mistaken for "signed out", or every launch would empty the copy.
+  useRecipeIndex(loading ? undefined : session?.user?.id ?? null)
 
   // Phase 1 events (no-ops unless VITE_EVENTS_ENABLED='true'): cold launch
   // always starts a new session; foreground return rotates only after the

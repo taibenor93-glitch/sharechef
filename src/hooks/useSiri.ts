@@ -29,6 +29,12 @@ export function useSiri(): void {
   useEffect(() => {
     if (Capacitor.getPlatform() !== 'ios') return
     return startSiriRouting(MicheliSiriNative, (action) => {
+      if (action.kind === 'recipe') {
+        // The id is a checked UUID (parseSiriAction). The saved-recipe screen
+        // loads it under the user's own sign-in, so someone else's id shows nothing.
+        navigateRef.current(`/saved/${action.id}`)
+        return
+      }
       siriInbox.put(action)
       navigateRef.current('/')
     })

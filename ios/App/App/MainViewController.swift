@@ -1,11 +1,12 @@
 import UIKit
 import Capacitor
 
-// Registers app-local Capacitor plugins (ScreenRecorderPlugin, MicheliCaresPlugin, MicheliSiriPlugin).
+// Registers app-local Capacitor plugins (ScreenRecorderPlugin, MicheliCaresPlugin, MicheliSiriPlugin, RecipeIndexPlugin).
 class MainViewController: CAPBridgeViewController {
     override open func capacitorDidLoad() {
         bridge?.registerPluginInstance(ScreenRecorderPlugin())
         bridge?.registerPluginInstance(MicheliCaresPlugin())
         bridge?.registerPluginInstance(MicheliSiriPlugin())
+        bridge?.registerPluginInstance(RecipeIndexPlugin())
     }
 }

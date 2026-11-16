@@ -89,6 +89,17 @@ function eq(name, actual, expected) {
   eq('an unknown request does nothing', parseSiriAction({ action: 'delete-account' }), null)
   eq('the action is matched exactly', parseSiriAction({ action: 'COOK' }), null)
   eq('null', parseSiriAction(null), null)
+
+  // Siri AI: open one saved recipe. The id ends up in a route, so only a real
+  // UUID may pass.
+  const ID = '51f047bb-df02-41d4-b73b-3bec5849f4dd'
+  eq('recipe with a UUID', parseSiriAction({ action: 'recipe', recipeId: ID }), { kind: 'recipe', id: ID })
+  eq('an uppercase UUID is normalised', parseSiriAction({ action: 'recipe', recipeId: ID.toUpperCase() }), { kind: 'recipe', id: ID })
+  eq('recipe with no id does nothing', parseSiriAction({ action: 'recipe' }), null)
+  eq('a path is not an id', parseSiriAction({ action: 'recipe', recipeId: '../preferences' }), null)
+  eq('an id with a path tacked on is refused', parseSiriAction({ action: 'recipe', recipeId: `${ID}/../../preferences` }), null)
+  eq('an id with a query tacked on is refused', parseSiriAction({ action: 'recipe', recipeId: `${ID}?x=1` }), null)
+  eq('a non-string id is refused', parseSiriAction({ action: 'recipe', recipeId: 42 }), null)
   eq('a string', parseSiriAction('cook'), null)
 }
 

@@ -7,6 +7,7 @@ import type { ShareChannel } from '../lib/shares'
 import { dishPhotoFile, dishPhotoUrl, removeDishPhoto } from '../lib/dishPhoto'
 import { DishPhotoPrompt } from '../components/DishPhotoPrompt'
 import { recipeShareText } from '../lib/recipeShareText'
+import { notifyRecipesChanged } from '../lib/recipeIndex'
 
 export function SavedDetailPage() {
   const { id } = useParams()
@@ -58,6 +59,7 @@ export function SavedDetailPage() {
     const { error } = await supabase.from('recipes').delete().eq('id', id)
     setBusy(false)
     if (error) return setError(error.message)
+    notifyRecipesChanged()
     if (recipe?.photo_path) await removeDishPhoto(recipe.photo_path).catch(() => {})
     nav('/saved', { replace: true })
   }

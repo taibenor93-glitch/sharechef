@@ -17,6 +17,12 @@
 export type SiriAction =
   | { kind: 'cook' }
   | { kind: 'make'; ingredients: string[] }
+  // Siri AI (iOS 27.3+): open one saved recipe. See ios/App/App/AppIntents/.
+  | { kind: 'recipe'; id: string }
+
+// A saved recipe's id is a database UUID. Anything else is refused, so the id
+// can be placed in a route (/saved/<id>) without being able to change it.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 export const SIRI_MAX_SPOKEN_LENGTH = 300
 export const SIRI_MAX_INGREDIENTS = 12
@@ -63,12 +69,17 @@ export function parseSiriIngredients(raw: unknown): string[] {
 
 /**
  * Read what the native plugin handed over. Returns null for anything that is
- * not one of the two known requests — null means "do nothing".
+ * not one of the known requests — null means "do nothing".
  */
 export function parseSiriAction(raw: unknown): SiriAction | null {
   if (!raw || typeof raw !== 'object') return null
-  const { action, ingredients } = raw as { action?: unknown; ingredients?: unknown }
+  const { action, ingredients, recipeId } = raw as { action?: unknown; ingredients?: unknown; recipeId?: unknown }
   if (action === 'cook') return { kind: 'cook' }
+  if (action === 'recipe') {
+    if (typeof recipeId !== 'string') return null
+    const id = recipeId.trim().toLowerCase()
+    return UUID_RE.test(id) ? { kind: 'recipe', id } : null
+  }
   if (action === 'make') {
     const list = parseSiriIngredients(ingredients)
     // Siri heard nothing usable: opening the app is still the right outcome,
@@ -120,7 +131,7 @@ export const siriInbox = createSiriInbox()
 /** The slice of the native MicheliSiri plugin we use. */
 export interface SiriSource {
   addListener(eventName: 'siriAction', listener: () => void): Promise<{ remove: () => void }>
-  takePending(): Promise<{ action?: string; ingredients?: string }>
+  takePending(): Promise<{ action?: string; ingredients?: string; recipeId?: string }>
 }
 
 /**

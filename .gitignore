@@ -14,3 +14,4 @@ tests/.compiled-voice/
 tests/.compiled-deeplink/
 tests/.compiled-playback/
 tests/.compiled-siri/
+tests/.compiled-recipe-index/

@@ -18,6 +18,7 @@ import { ScreenRecorder, canRecordInApp } from '../lib/screenRecorder'
 import { startTape, stopTape, isTaping } from '../lib/soundTape'
 import { siriInbox } from '../lib/siri'
 import type { SiriAction } from '../lib/siri'
+import { notifyRecipesChanged } from '../lib/recipeIndex'
 
 // "Hey Siri, cook with Micheli" starts a cook with no tap. iOS only lets sound
 // start without a tap in some setups; if it has not started in this long, the
@@ -217,7 +218,7 @@ export function HomePage() {
       setIngredients(action.ingredients)
       return
     }
-    void startCookFromSiri()
+    if (action.kind === 'cook') void startCookFromSiri()
   }
 
   useEffect(() => {
@@ -289,6 +290,7 @@ export function HomePage() {
     }
     setSavedId(inserted?.id ?? null)
     setSaveState('saved')
+    notifyRecipesChanged()
     loadCount()
   }
 

@@ -21,6 +21,10 @@
 		5C5CE1E02C0000000000D001 /* MicheliCaresPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C5CE1E02C0000000000D000 /* MicheliCaresPlugin.swift */; };
 		5C5CE1E02C0000000000F001 /* MicheliSiriPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C5CE1E02C0000000000F000 /* MicheliSiriPlugin.swift */; };
 		5C5CE1E02C0000000000A101 /* MicheliSiriIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C5CE1E02C0000000000A100 /* MicheliSiriIntents.swift */; };
+		5C5CE1E02C0000000000B101 /* RecipeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C5CE1E02C0000000000B100 /* RecipeStore.swift */; };
+		5C5CE1E02C0000000000B201 /* RecipeEntity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C5CE1E02C0000000000B200 /* RecipeEntity.swift */; };
+		5C5CE1E02C0000000000B301 /* RecipeIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C5CE1E02C0000000000B300 /* RecipeIntents.swift */; };
+		5C5CE1E02C0000000000B401 /* RecipeIndexPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C5CE1E02C0000000000B400 /* RecipeIndexPlugin.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -39,6 +43,10 @@
 		5C5CE1E02C0000000000D000 /* MicheliCaresPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MicheliCaresPlugin.swift; sourceTree = "<group>"; };
 		5C5CE1E02C0000000000F000 /* MicheliSiriPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MicheliSiriPlugin.swift; sourceTree = "<group>"; };
 		5C5CE1E02C0000000000A100 /* MicheliSiriIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MicheliSiriIntents.swift; sourceTree = "<group>"; };
+		5C5CE1E02C0000000000B100 /* RecipeStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeStore.swift; sourceTree = "<group>"; };
+		5C5CE1E02C0000000000B200 /* RecipeEntity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeEntity.swift; sourceTree = "<group>"; };
+		5C5CE1E02C0000000000B300 /* RecipeIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeIntents.swift; sourceTree = "<group>"; };
+		5C5CE1E02C0000000000B400 /* RecipeIndexPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeIndexPlugin.swift; sourceTree = "<group>"; };
 		5C5CE1E02C0000000000E000 /* App.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = App.entitlements; sourceTree = "<group>"; };
 		958DCC722DB07C7200EA8C5F /* debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = debug.xcconfig; path = ../debug.xcconfig; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
@@ -83,6 +91,7 @@
 				5C5CE1E02C0000000000D000 /* MicheliCaresPlugin.swift */,
 				5C5CE1E02C0000000000F000 /* MicheliSiriPlugin.swift */,
 				5C5CE1E02C0000000000A100 /* MicheliSiriIntents.swift */,
+				5C5CE1E02C0000000000B900 /* AppIntents */,
 				504EC30B1FED79650016851F /* Main.storyboard */,
 				504EC30E1FED79650016851F /* Assets.xcassets */,
 				504EC3101FED79650016851F /* LaunchScreen.storyboard */,
@@ -92,6 +101,17 @@
 				50B271D01FEDC1A000F3C39B /* public */,
 			);
 			path = App;
+			sourceTree = "<group>";
+		};
+		5C5CE1E02C0000000000B900 /* AppIntents */ = {
+			isa = PBXGroup;
+			children = (
+				5C5CE1E02C0000000000B100 /* RecipeStore.swift */,
+				5C5CE1E02C0000000000B200 /* RecipeEntity.swift */,
+				5C5CE1E02C0000000000B300 /* RecipeIntents.swift */,
+				5C5CE1E02C0000000000B400 /* RecipeIndexPlugin.swift */,
+			);
+			path = AppIntents;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -182,6 +202,10 @@
 				5C5CE1E02C0000000000D001 /* MicheliCaresPlugin.swift in Sources */,
 				5C5CE1E02C0000000000F001 /* MicheliSiriPlugin.swift in Sources */,
 				5C5CE1E02C0000000000A101 /* MicheliSiriIntents.swift in Sources */,
+				5C5CE1E02C0000000000B101 /* RecipeStore.swift in Sources */,
+				5C5CE1E02C0000000000B201 /* RecipeEntity.swift in Sources */,
+				5C5CE1E02C0000000000B301 /* RecipeIntents.swift in Sources */,
+				5C5CE1E02C0000000000B401 /* RecipeIndexPlugin.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
