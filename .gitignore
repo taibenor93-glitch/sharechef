@@ -13,3 +13,6 @@ tsconfig.tsbuildinfo
 tests/.compiled-voice/
 tests/.compiled-deeplink/
 tests/.compiled-playback/
+tests/.compiled-cares-roles/
+tests/.compiled-siri/
+tests/.compiled-recipe-index/

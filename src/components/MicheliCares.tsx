@@ -9,6 +9,7 @@ import {
   removeLink,
   turnOnCheckInsOnThisPhone,
 } from '../lib/micheliCares'
+import { caresRoleBlockedReason, caresRoleChoices } from '../lib/caresRoles'
 
 // Micheli Cares 💛 — sits on the Preferences page, after the food settings.
 // Parent side: type the teen's code, allow notifications. Teen side: make a code.
@@ -32,6 +33,9 @@ export function MicheliCares({ userId }: { userId: string }) {
 
   const asParent = links.filter((l) => l.parentId === userId)
   const asTeen = links.filter((l) => l.teenId === userId)
+  // One role per account: a parent is never offered "I'm the teen", and a teen
+  // is never offered "I'm the parent". See lib/caresRoles.ts.
+  const roleChoices = caresRoleChoices(links, userId)
 
   const refresh = useCallback(async () => {
     try {
@@ -69,6 +73,11 @@ export function MicheliCares({ userId }: { userId: string }) {
 
   const onConnect = async () => {
     if (busy) return
+    const blocked = caresRoleBlockedReason(links, userId, 'parent')
+    if (blocked) {
+      setMessage({ kind: 'error', text: blocked })
+      return
+    }
     // Say what is missing instead of a button that silently does nothing.
     if (codeInput.trim().length < 6) {
       setMessage({ kind: 'error', text: 'Type the 6-character code your teen reads to you.' })
@@ -104,6 +113,11 @@ export function MicheliCares({ userId }: { userId: string }) {
 
   const onMakeCode = async () => {
     if (busy) return
+    const blocked = caresRoleBlockedReason(links, userId, 'teen')
+    if (blocked) {
+      setMessage({ kind: 'error', text: blocked })
+      return
+    }
     // Say what is missing instead of a button that silently does nothing.
     if (!teenName.trim()) {
       setMessage({ kind: 'error', text: 'Type your first name first.' })
@@ -180,14 +194,23 @@ export function MicheliCares({ userId }: { userId: string }) {
         </div>
       )}
 
-      {role === 'none' && (
+      {role === 'none' && roleChoices.length > 0 && (
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          <button type="button" className="btn btn-ghost" onClick={() => { setRole('parent'); setMessage(null) }}>
-            I’m the parent
-          </button>
-          <button type="button" className="btn btn-ghost" onClick={() => { setRole('teen'); setMessage(null) }}>
-            I’m the teen
-          </button>
+          {roleChoices.includes('parent') && (
+            <button type="button" className="btn btn-ghost" onClick={() => { setRole('parent'); setMessage(null) }}>
+              {asParent.length > 0 ? 'Connect another teen' : 'I’m the parent'}
+            </button>
+          )}
+          {roleChoices.includes('teen') && (
+            <button type="button" className="btn btn-ghost" onClick={() => { setRole('teen'); setMessage(null) }}>
+              {asTeen.length > 0 ? 'Connect another parent' : 'I’m the teen'}
+            </button>
+          )}
+        </div>
+      )}
+      {role === 'none' && roleChoices.length === 0 && (
+        <div className="muted" style={{ fontSize: 13 }}>
+          This account is connected as both a parent and a teen. Remove one of the connections above to add another.
         </div>
       )}
 
