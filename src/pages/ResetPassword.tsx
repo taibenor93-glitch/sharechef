@@ -34,7 +34,9 @@ export function ResetPasswordPage() {
       }
     })
     const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
-      setAccountEmail(session?.user.email ?? null)
+      // Keep the email through the post-save sign-out so the confirmation still
+      // names the account; "Not you?" clears it explicitly.
+      if (session) setAccountEmail(session.user.email ?? null)
       if (event === 'PASSWORD_RECOVERY') setMode('update')
     })
     return () => sub.subscription.unsubscribe()
@@ -43,7 +45,7 @@ export function ResetPasswordPage() {
   // "Not you?": drop the current session and go back to requesting a link, so a
   // password is never set on an account the person didn't mean to change.
   const switchAccount = async () => {
-    await supabase.auth.signOut()
+    await supabase.auth.signOut({ scope: 'local' }).catch(() => undefined)
     setAccountEmail(null)
     setPassword('')
     setConfirmPassword('')
@@ -73,9 +75,17 @@ export function ResetPasswordPage() {
     setError(null)
     setNotice(null)
     const { error } = await supabase.auth.updateUser({ password })
+    if (error) {
+      setBusy(false)
+      return setError(error.message)
+    }
+    // The recovery link signed this browser in. Without signing out here, /login
+    // sees that session and bounces straight to home, so the person never
+    // actually uses (or proves) the new password. Local scope only: other
+    // devices stay signed in.
+    await supabase.auth.signOut({ scope: 'local' }).catch(() => undefined)
     setBusy(false)
-    if (error) return setError(error.message)
-    setNotice('Your password has been updated. Redirecting you to sign in…')
+    setNotice('Your password has been updated. Sign in with your new password…')
     setTimeout(() => nav('/login', { replace: true }), 1600)
   }
 
