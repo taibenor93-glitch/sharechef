@@ -11,6 +11,7 @@ export function ResetPasswordPage() {
   const nav = useNavigate()
   const [mode, setMode] = useState<'request' | 'update'>('request')
   const [email, setEmail] = useState('')
+  const [accountEmail, setAccountEmail] = useState<string | null>(null)
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
@@ -23,14 +24,33 @@ export function ResetPasswordPage() {
     // fires PASSWORD_RECOVERY. That can happen before this component mounts, so
     // also check on mount for a session the recovery link already established —
     // if one exists, we're here to set a new password.
+    // The account email is kept so the page can say whose password is changing:
+    // password managers and stale sessions otherwise make it look like a
+    // different account is being reset.
     supabase.auth.getSession().then(({ data }) => {
-      if (data.session) setMode('update')
+      if (data.session) {
+        setAccountEmail(data.session.user.email ?? null)
+        setMode('update')
+      }
     })
-    const { data: sub } = supabase.auth.onAuthStateChange((event) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+      setAccountEmail(session?.user.email ?? null)
       if (event === 'PASSWORD_RECOVERY') setMode('update')
     })
     return () => sub.subscription.unsubscribe()
   }, [])
+
+  // "Not you?": drop the current session and go back to requesting a link, so a
+  // password is never set on an account the person didn't mean to change.
+  const switchAccount = async () => {
+    await supabase.auth.signOut()
+    setAccountEmail(null)
+    setPassword('')
+    setConfirmPassword('')
+    setError(null)
+    setNotice(null)
+    setMode('request')
+  }
 
   const sendLink = async (e: FormEvent) => {
     e.preventDefault()
@@ -70,13 +90,41 @@ export function ResetPasswordPage() {
           </div>
           <div className="auth-sub">
             {mode === 'update'
-              ? 'Choose a new password for your account.'
+              ? accountEmail
+                ? <>Choose a new password for <strong>{accountEmail}</strong>.</>
+                : 'Choose a new password for your account.'
               : "Enter your email and we'll send you a reset link."}
           </div>
         </div>
 
         {mode === 'update' ? (
           <form className="card stack" onSubmit={updatePassword}>
+            {accountEmail && (
+              <div className="field">
+                <label className="label">Account</label>
+                {/* Read-only username field: tells password managers which
+                    account this new password belongs to. */}
+                <input
+                  type="email"
+                  name="username"
+                  value={accountEmail}
+                  autoComplete="username"
+                  readOnly
+                  aria-readonly="true"
+                />
+                <div className="auth-alt" style={{ textAlign: 'left' }}>
+                  Not you?{' '}
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    style={{ padding: '2px 8px', fontSize: 13 }}
+                    onClick={switchAccount}
+                  >
+                    Reset a different account
+                  </button>
+                </div>
+              </div>
+            )}
             <div className="field">
               <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
                 <label className="label">New password</label>
