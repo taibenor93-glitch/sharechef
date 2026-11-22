@@ -19,6 +19,7 @@
 		5C5CE1E02C0000000000C001 /* MainViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C5CE1E02C0000000000C000 /* MainViewController.swift */; };
 		5C5CE1E02C0000000000B001 /* ScreenRecorderPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C5CE1E02C0000000000B000 /* ScreenRecorderPlugin.swift */; };
 		5C5CE1E02C0000000000D001 /* MicheliCaresPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C5CE1E02C0000000000D000 /* MicheliCaresPlugin.swift */; };
+		5C5CE1E02C0000000000F001 /* AppReviewPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C5CE1E02C0000000000F000 /* AppReviewPlugin.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -35,6 +36,7 @@
 		5C5CE1E02C0000000000C000 /* MainViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainViewController.swift; sourceTree = "<group>"; };
 		5C5CE1E02C0000000000B000 /* ScreenRecorderPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenRecorderPlugin.swift; sourceTree = "<group>"; };
 		5C5CE1E02C0000000000D000 /* MicheliCaresPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MicheliCaresPlugin.swift; sourceTree = "<group>"; };
+		5C5CE1E02C0000000000F000 /* AppReviewPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppReviewPlugin.swift; sourceTree = "<group>"; };
 		5C5CE1E02C0000000000E000 /* App.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = App.entitlements; sourceTree = "<group>"; };
 		958DCC722DB07C7200EA8C5F /* debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = debug.xcconfig; path = ../debug.xcconfig; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
@@ -77,6 +79,7 @@
 				5C5CE1E02C0000000000C000 /* MainViewController.swift */,
 				5C5CE1E02C0000000000B000 /* ScreenRecorderPlugin.swift */,
 				5C5CE1E02C0000000000D000 /* MicheliCaresPlugin.swift */,
+				5C5CE1E02C0000000000F000 /* AppReviewPlugin.swift */,
 				504EC30B1FED79650016851F /* Main.storyboard */,
 				504EC30E1FED79650016851F /* Assets.xcassets */,
 				504EC3101FED79650016851F /* LaunchScreen.storyboard */,
@@ -174,6 +177,7 @@
 				5C5CE1E02C0000000000C001 /* MainViewController.swift in Sources */,
 				5C5CE1E02C0000000000B001 /* ScreenRecorderPlugin.swift in Sources */,
 				5C5CE1E02C0000000000D001 /* MicheliCaresPlugin.swift in Sources */,
+				5C5CE1E02C0000000000F001 /* AppReviewPlugin.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
