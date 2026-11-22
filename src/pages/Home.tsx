@@ -293,15 +293,25 @@ export function HomePage() {
   const [cookWrapUp, setCookWrapUp] = useState<'idle' | 'working' | 'none' | 'error'>('idle')
 
   const finishVoiceCook = async (said: Line[]) => {
+    // Diagnostics (owner only), logged under the existing "disconnect" report.
+    const userLines = said.filter((l) => l.role === 'user').length
+    const chefLines = said.filter((l) => l.role === 'chef').length
     // Nothing worth writing up: Micheli never heard the user, or never answered.
-    if (!said.some((l) => l.role === 'user') || !said.some((l) => l.role === 'chef')) return
+    if (!userLines || !chefLines) {
+      diag('disconnect', { step: 'finish', userLines, chefLines, result: 'skipped-no-chat' })
+      return
+    }
     lastCookRef.current = said
     const { data } = await supabase.auth.getSession()
     const token = data.session?.access_token
-    if (!token || !userId) return // voice cooks are signed-in only
+    if (!token || !userId) {
+      diag('disconnect', { step: 'finish', userLines, chefLines, result: 'skipped-no-session', token: !!token, user: !!userId })
+      return // voice cooks are signed-in only
+    }
     setCookWrapUp('working')
     try {
       const r = await recipeFromCook(said, language, token)
+      diag('disconnect', { step: 'finish', userLines, chefLines, result: r ? 'recipe' : 'no-dish' })
       if (!r) { setCookWrapUp('none'); return }
       setCookWrapUp('idle')
       setGenError(null)
@@ -311,7 +321,8 @@ export function HomePage() {
       setPhotoStep('ask')
       await saveRecipe(r, userId)
       recipeCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    } catch {
+    } catch (e) {
+      diag('disconnect', { step: 'finish', userLines, chefLines, result: 'error', message: (e instanceof Error ? e.message : String(e)).slice(0, 120) })
       setCookWrapUp('error')
     }
   }
