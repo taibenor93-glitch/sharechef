@@ -50,6 +50,25 @@ export function HomePage() {
   const [savingClip, setSavingClip] = useState(false)
   const [recInfo, setRecInfo] = useState<string | null>(null)
   useEffect(() => { setDiagUser(userId) }, [userId])
+  // Apple's recorder keeps running when you leave the Cook screen, but this
+  // screen's state does not survive. Ask the recorder on every open, so a
+  // recording in progress always comes back with its Stop button (and saves).
+  // The sound tape lives at module level, so it keeps its place meanwhile.
+  useEffect(() => {
+    if (!showRecorder) return
+    let cancelled = false
+    withTimeout(ScreenRecorder.isRecording(), 3000, "Apple's screen recorder")
+      .then(({ recording: on }) => {
+        if (cancelled || !on) return
+        diag('record_resume', { taping: isTaping() })
+        setRecording(true)
+        if (!isTaping()) {
+          setRecError('A recording is running, but its sound copy was lost when the app restarted. Tap Stop to end it; this one will save without sound.')
+        }
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [showRecorder])
   async function toggleRecording() {
     setRecError(null)
     setRecInfo(null)
