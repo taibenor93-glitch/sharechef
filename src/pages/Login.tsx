@@ -25,7 +25,7 @@ export function LoginPage() {
     <div className="auth-wrap">
       <div className="auth-card stack">
         <div className="auth-hero">
-          <div className="auth-logo"><span className="brand-dot" /> ShareChef</div>
+          <div className="auth-logo">ShareChef</div>
           <div className="spacer" />
           <div className="auth-title">Welcome back</div>
           <div className="auth-sub">Sign in to cook with Micheli.</div>

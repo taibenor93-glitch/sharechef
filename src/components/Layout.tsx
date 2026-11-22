@@ -5,7 +5,7 @@ import { PRIVACY_URL, TERMS_URL } from '../lib/purchases'
 
 export function Layout() {
   const nav = useNavigate()
-  const { session, guest } = useAuth()
+  const { session } = useAuth()
 
   const leave = async () => {
     if (session) await supabase.auth.signOut()
@@ -31,7 +31,7 @@ export function Layout() {
             <NavLink to="/saved" className={linkClass}>My recipes</NavLink>
             <NavLink to="/preferences" className={linkClass}>Preferences</NavLink>
             <button type="button" className="nav-link nav-signout" onClick={leave}>
-              {guest && !session ? 'Sign in' : 'Sign out'}
+              {session ? 'Sign out' : 'Sign in'}
             </button>
           </nav>
         </div>

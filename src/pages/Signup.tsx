@@ -51,7 +51,7 @@ export function SignupPage() {
     <div className="auth-wrap">
       <div className="auth-card stack">
         <div className="auth-hero">
-          <div className="auth-logo"><span className="brand-dot" /> ShareChef</div>
+          <div className="auth-logo">ShareChef</div>
           <div className="spacer" />
           <div className="auth-title">Create your kitchen</div>
           <div className="auth-sub">Save recipes and earn your Micheli Star.</div>
