@@ -7,7 +7,6 @@ import { getAnonId, getSessionId, initIdentity } from '../lib/session'
 import { APP_VERSION, voiceActivity } from '../lib/events'
 import { tapeMic, tapeVoice } from '../lib/soundTape'
 import { diag, liveMicTracks, streamsOpened, trackStream } from '../lib/diag'
-import { nativeMicState, releaseNativeAudio } from '../lib/audioSession'
 import { StreamResampler } from './streamResampler'
 
 // Phase 1 events: identity + app version ride the auth frame ONLY when
@@ -408,21 +407,8 @@ export class RealtimeVoice {
     }
     if (this.audioCtx) { this.audioCtx.close().catch(() => {}); this.audioCtx = null }
     diag('release_mic', { hadMic, liveTracks: liveMicTracks(), opened: streamsOpened() })
-    // Stopping the tracks is not enough on iPhone: the web view keeps its
-    // capture (and the orange dot) alive. Once the audio contexts have closed,
-    // hand the mic back to iOS — unless a new cook has already taken it.
-    window.setTimeout(() => {
-      if (!this.micStream) void releaseNativeAudio()
-    }, 300)
     // The iOS dot should go dark within a moment; record what is still live.
-    // Check what iOS says at 2, 5 and 15 seconds: on a real iPhone this is the
-    // orange dot (the simulator always clears it within about 2 seconds).
-    for (const at of [2, 5, 15]) {
-      window.setTimeout(() => {
-        void nativeMicState().then((ios) =>
-          diag('mic_after_release', { at, liveTracks: liveMicTracks(), hasMic: !!this.micStream, ios }))
-      }, at * 1000)
-    }
+    window.setTimeout(() => diag('mic_after_release', { liveTracks: liveMicTracks(), hasMic: !!this.micStream }), 2000)
   }
 
   stopListening(): void {
