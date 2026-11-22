@@ -20,8 +20,10 @@ export function Layout() {
     <div className="app">
       <header className="topbar">
         <div className="topbar-inner">
+          {/* No gold brand dot here: on a phone it sat alone in the top bar and
+              read as a recording light. The dot stays on sign-in and other brand
+              spots; the app's brand comes through the whole system instead. */}
           <NavLink to="/" className="brand" aria-label="ShareChef home">
-            <span className="brand-dot" />
             <span className="brand-name">ShareChef</span>
           </NavLink>
           <nav className="nav">

@@ -6,7 +6,7 @@ import { WS_BASE } from '../lib/apiBase'
 import { getAnonId, getSessionId, initIdentity } from '../lib/session'
 import { APP_VERSION, voiceActivity } from '../lib/events'
 import { tapeMic, tapeVoice } from '../lib/soundTape'
-import { diag, liveMicTracks, streamsOpened, trackStream } from '../lib/diag'
+import { diag, liveMicTracks, streamsOpened, trackCount, trackStream } from '../lib/diag'
 import { StreamResampler } from './streamResampler'
 
 // Phase 1 events: identity + app version ride the auth frame ONLY when
@@ -335,9 +335,9 @@ export class RealtimeVoice {
         }
         this.micStream = stream
         trackStream(stream)
-        const settings = stream.getAudioTracks()[0]?.getSettings?.() ?? {}
+        const settings = stream.getAudioTracks?.()[0]?.getSettings?.() ?? {}
         diag('mic_open', {
-          tracks: stream.getAudioTracks().length,
+          tracks: trackCount(stream),
           trackRate: (settings as any).sampleRate ?? null,
           liveTracks: liveMicTracks(),
           opened: streamsOpened(),
