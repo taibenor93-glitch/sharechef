@@ -16,6 +16,19 @@ import { syncPlusWithServer } from '../lib/purchases'
 import { canUseRecordingMode } from '../lib/recordingMode'
 import { ScreenRecorder, canRecordInApp } from '../lib/screenRecorder'
 import { startTape, stopTape, isTaping } from '../lib/soundTape'
+import { diag, liveMicTracks, setDiagUser } from '../lib/diag'
+
+// Apple's recorder normally answers within a second or two (longer only while
+// its "Allow screen recording?" prompt is up). Past this, say so instead of
+// leaving the button looking dead.
+const RECORDER_TIMEOUT_MS = 10000
+
+function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(new Error(`${what} didn't answer after ${Math.round(ms / 1000)} seconds.`)), ms)
+    p.then((v) => { window.clearTimeout(timer); resolve(v) }, (e) => { window.clearTimeout(timer); reject(e) })
+  })
+}
 
 type Line = { role: 'user' | 'chef'; text: string }
 
@@ -36,9 +49,11 @@ export function HomePage() {
   const [recError, setRecError] = useState<string | null>(null)
   const [savingClip, setSavingClip] = useState(false)
   const [recInfo, setRecInfo] = useState<string | null>(null)
+  useEffect(() => { setDiagUser(userId) }, [userId])
   async function toggleRecording() {
     setRecError(null)
     setRecInfo(null)
+    diag('record_tap', { recording, voice: status, liveTracks: liveMicTracks() })
     try {
       if (recording) {
         setRecording(false)
@@ -46,17 +61,23 @@ export function HomePage() {
         const tape = stopTape()
         const info = `Sound kept: ${Math.round(tape.seconds)}s, level ${Math.round(tape.peak * 100)}%, Micheli parts ${tape.voiceChunks}, your parts ${tape.micChunks}`
         setRecInfo(info)
-        const res = await ScreenRecorder.stop({ audioWav: tape.wav })
+        const res = await withTimeout(ScreenRecorder.stop({ audioWav: tape.wav }), 60000, "Apple's screen recorder")
+        diag('record_stop_ok', { seconds: Math.round(tape.seconds), audioTracks: res.audioTracks })
         setRecInfo(`${info}. Joined to video: ${res.audioTracks > 0 ? 'yes' : 'NO'}. Saved to Photos.`)
       } else {
-        await ScreenRecorder.start({ microphone: false })
+        const before = await withTimeout(ScreenRecorder.isRecording(), 3000, "Apple's screen recorder").catch(() => null)
+        diag('record_start_call', { alreadyRecording: before?.recording ?? null })
+        await withTimeout(ScreenRecorder.start({ microphone: false }), RECORDER_TIMEOUT_MS, "Apple's screen recorder")
+        diag('record_start_ok')
         startTape()
         setRecording(true)
       }
     } catch (e) {
       if (isTaping()) stopTape()
       setRecording(false)
-      setRecError(e instanceof Error ? e.message : String(e))
+      const msg = e instanceof Error ? e.message : String(e)
+      diag('record_fail', { phase: recording ? 'stop' : 'start', message: msg.slice(0, 160) })
+      setRecError(msg)
     } finally {
       setSavingClip(false)
     }

@@ -6,6 +6,7 @@ import { WS_BASE } from '../lib/apiBase'
 import { getAnonId, getSessionId, initIdentity } from '../lib/session'
 import { APP_VERSION, voiceActivity } from '../lib/events'
 import { tapeMic, tapeVoice } from '../lib/soundTape'
+import { diag, liveMicTracks, streamsOpened, trackStream } from '../lib/diag'
 import { StreamResampler } from './streamResampler'
 
 // Phase 1 events: identity + app version ride the auth frame ONLY when
@@ -39,6 +40,11 @@ export class RealtimeVoice {
   private resampler: StreamResampler | null = null
   private nextPlayFrame = 0
   private isListening = false
+  // Diagnostics only (owner builds): overlapping mic starts and playback gaps.
+  private listenInFlight = 0
+  private playbackGaps = 0
+  private playbackChunks = 0
+  private ratesReported = false
   private pendingTranscript = ''
   private cb: VoiceCallbacks
   // Reconnect-after-drop: iOS loves to kill background sockets mid-cook.
@@ -207,8 +213,14 @@ export class RealtimeVoice {
     this.ws.onerror = () => {
       /* the close handler that always follows decides whether to reconnect */
     }
-    this.ws.onclose = () => {
+    this.ws.onclose = (ev: CloseEvent) => {
       if (this.ws !== socket) return
+      diag('ws_close', {
+        code: ev?.code ?? 0,
+        intentional: this.intentionalEnd,
+        timeLimit: this.endingForTimeLimit,
+        attempts: this.reconnectAttempts,
+      })
       this.clearStableTimer()
       this.isPlayingAudio = false
       if (!this.intentionalEnd && !this.endingForTimeLimit && this.reconnectAttempts < 3) {
@@ -244,6 +256,16 @@ export class RealtimeVoice {
   }
 
   disconnect(): void {
+    diag('disconnect', {
+      gaps: this.playbackGaps,
+      chunks: this.playbackChunks,
+      listening: this.isListening,
+      hasMic: !!this.micStream,
+      liveTracks: liveMicTracks(),
+    })
+    this.playbackGaps = 0
+    this.playbackChunks = 0
+    this.ratesReported = false
     this.intentionalEnd = true
     this.clearStableTimer()
     voiceActivity() // deliberate end is the last activity marker of the session
@@ -294,6 +316,8 @@ export class RealtimeVoice {
   async startListening(): Promise<void> {
     if (this.isListening || this.intentionalEnd) return
     const socket = this.ws
+    if (this.listenInFlight > 0) diag('listen_overlap', { inFlight: this.listenInFlight, hasMic: !!this.micStream })
+    this.listenInFlight++
     try {
       if (!this.micStream) {
         // Always take the processed mic. echoCancellation and noiseSuppression
@@ -310,6 +334,14 @@ export class RealtimeVoice {
           return
         }
         this.micStream = stream
+        trackStream(stream)
+        const settings = stream.getAudioTracks()[0]?.getSettings?.() ?? {}
+        diag('mic_open', {
+          tracks: stream.getAudioTracks().length,
+          trackRate: (settings as any).sampleRate ?? null,
+          liveTracks: liveMicTracks(),
+          opened: streamsOpened(),
+        })
       }
       if (!this.audioCtx) {
         this.audioCtx = new (
@@ -330,6 +362,16 @@ export class RealtimeVoice {
       this.processorNode.connect(this.audioCtx!.destination)
 
       this.isListening = true
+      if (!this.ratesReported) {
+        this.ratesReported = true
+        diag('listening', {
+          micRate: this.audioCtx!.sampleRate,
+          micCtx: this.audioCtx!.state,
+          playRate: this.playbackCtx?.sampleRate ?? null,
+          playCtx: this.playbackCtx?.state ?? null,
+          liveTracks: liveMicTracks(),
+        })
+      }
       this.cb.onStatus('listening')
     } catch (err: any) {
       // The mic may already be open (getUserMedia succeeded, the worklet did
@@ -338,11 +380,14 @@ export class RealtimeVoice {
       this.releaseMic()
       if (this.intentionalEnd || this.ws !== socket) return
       console.error('startListening failed:', err?.name, err?.message)
+      diag('listen_fail', { name: String(err?.name ?? ''), message: String(err?.message ?? '').slice(0, 120) })
       const friendly = err?.name === 'NotAllowedError'
         ? 'Micheli needs microphone access. Enable it in Settings > ShareChef > Microphone.'
         : 'Voice is unavailable right now. Tap the mic to try again.'
       this.cb.onError(friendly)
       this.cb.onStatus('ready')
+    } finally {
+      this.listenInFlight--
     }
   }
 
@@ -354,12 +399,16 @@ export class RealtimeVoice {
    * Call it on every path that ends a session.
    */
   private releaseMic(): void {
+    const hadMic = !!this.micStream
     this.stopListening()
     if (this.micStream) {
       this.micStream.getTracks().forEach((t) => t.stop())
       this.micStream = null
     }
     if (this.audioCtx) { this.audioCtx.close().catch(() => {}); this.audioCtx = null }
+    diag('release_mic', { hadMic, liveTracks: liveMicTracks(), opened: streamsOpened() })
+    // The iOS dot should go dark within a moment; record what is still live.
+    window.setTimeout(() => diag('mic_after_release', { liveTracks: liveMicTracks(), hasMic: !!this.micStream }), 2000)
   }
 
   stopListening(): void {
@@ -503,6 +552,9 @@ export class RealtimeVoice {
     // Whole frames only: each chunk starts on the exact frame the last one
     // ended, so they butt together with no gap and no overlap.
     const startFrame = Math.max(this.nextPlayFrame, Math.ceil((ctx.currentTime + 0.05) * rate))
+    // A chunk that can't butt against the previous one leaves a hole: an audible click.
+    this.playbackChunks++
+    if (startFrame > this.nextPlayFrame && this.playbackChunks > 1) this.playbackGaps++
     const startAt = startFrame / rate
     node.start(startAt)
     tapeVoice(samples, performance.now() + (startAt - ctx.currentTime) * 1000)

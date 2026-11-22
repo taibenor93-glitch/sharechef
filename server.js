@@ -72,6 +72,32 @@ app.use('/api/events', (err, _req, res, _next) => {
   res.status(status).json({ error: status === 413 ? 'payload too large' : 'bad request' })
 })
 
+// ── Owner diagnostics (iPhone mic / Record button investigation) ─────────────
+// Log-only: prints "[diag]" lines, stores nothing. The app sends these only for
+// owner accounts (src/lib/diag.ts). Accepts a fixed set of event names and flat
+// short values; anything else is dropped. Registered before the global parser so
+// its own 1 KB limit is the real boundary.
+const DIAG_EVENTS = new Set(['ws_close', 'disconnect', 'listen_overlap', 'mic_open',
+  'listening', 'listen_fail', 'release_mic', 'mic_after_release', 'record_tap',
+  'record_start_call', 'record_start_ok', 'record_stop_ok', 'record_fail'])
+app.post('/api/diag', express.json({ limit: '1kb' }), (req, res) => {
+  const b = req.body
+  if (!b || typeof b !== 'object' || Array.isArray(b) || !DIAG_EVENTS.has(b.event)) {
+    return res.status(400).json({ error: 'bad diag' })
+  }
+  if (rateLimited('diag:' + (req.ip || 'unknown'))) return res.status(429).end()
+  const parts = []
+  for (const [k, v] of Object.entries(b).slice(0, 16)) {
+    if (k === 'event' || !/^[a-zA-Z]{1,20}$/.test(k)) continue
+    if (typeof v === 'number' && Number.isFinite(v)) parts.push(`${k}=${v}`)
+    else if (typeof v === 'boolean' || v === null) parts.push(`${k}=${v}`)
+    else if (typeof v === 'string') parts.push(`${k}=${JSON.stringify(v.slice(0, 160))}`)
+  }
+  console.log(`[diag] ${b.event} ${parts.join(' ')}`)
+  res.status(204).end()
+})
+app.use('/api/diag', (_err, _req, res, _next) => res.status(400).json({ error: 'bad diag' }))
+
 // ── Account deletion (Revision 6) ────────────────────────────────────────────
 // PERMANENT, privacy-first account deletion. Authorized by the user's normal
 // signed-in session token, verified live with Supabase (a signed-out or revoked
