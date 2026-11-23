@@ -16,10 +16,33 @@ type Props = {
 }
 
 const RESEND_SECONDS = 60
+// iPhone can reload the app while the user is in Gmail reading the code.
+// Remember the pending sign-in so the code screen survives that reload.
+const PENDING_KEY = 'sc.pendingEmailCode'
+const PENDING_MAX_MS = 60 * 60 * 1000
+
+type Pending = { email: string; mode: Props['mode']; sentAt: number }
+
+function readPending(mode: Props['mode']): Pending | null {
+  try {
+    const raw = localStorage.getItem(PENDING_KEY)
+    if (!raw) return null
+    const p = JSON.parse(raw) as Pending
+    if (p.mode !== mode || !p.email || Date.now() - p.sentAt > PENDING_MAX_MS) return null
+    return p
+  } catch { return null }
+}
+function writePending(p: Pending | null): void {
+  try {
+    if (p) localStorage.setItem(PENDING_KEY, JSON.stringify(p))
+    else localStorage.removeItem(PENDING_KEY)
+  } catch { /* storage unavailable: the screen just won't survive a reload */ }
+}
 
 export function EmailCodeForm({ mode, children, onBeforeSend, onSignedIn }: Props) {
-  const [step, setStep] = useState<'email' | 'code'>('email')
-  const [email, setEmail] = useState('')
+  const pending = readPending(mode)
+  const [step, setStep] = useState<'email' | 'code'>(pending ? 'code' : 'email')
+  const [email, setEmail] = useState(pending?.email ?? '')
   const [code, setCode] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -54,6 +77,7 @@ export function EmailCodeForm({ mode, children, onBeforeSend, onSignedIn }: Prop
     setEmail(address)
     setCode('')
     setStep('code')
+    writePending({ email: address, mode, sentAt: Date.now() })
     setWait(RESEND_SECONDS)
   }
 
@@ -77,6 +101,7 @@ export function EmailCodeForm({ mode, children, onBeforeSend, onSignedIn }: Prop
           : error.message
       )
     }
+    writePending(null)
     onSignedIn(data.session ?? null)
   }
 
@@ -107,7 +132,7 @@ export function EmailCodeForm({ mode, children, onBeforeSend, onSignedIn }: Prop
           <button
             type="button"
             className="link-btn"
-            onClick={() => { setStep('email'); setError(null) }}
+            onClick={() => { writePending(null); setStep('email'); setError(null) }}
           >
             Use a different email
           </button>
