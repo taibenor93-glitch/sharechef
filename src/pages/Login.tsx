@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
+import { EmailCodeForm } from '../components/EmailCodeForm'
 
 export function LoginPage() {
   const nav = useNavigate()
@@ -10,6 +11,8 @@ export function LoginPage() {
   const [showPassword, setShowPassword] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Email code is the default. The password form stays as a fallback for now.
+  const [usePassword, setUsePassword] = useState(false)
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault()
@@ -31,6 +34,16 @@ export function LoginPage() {
           <div className="auth-sub">Sign in to cook with Micheli.</div>
         </div>
 
+        {!usePassword && (
+          <EmailCodeForm mode="signin" onSignedIn={() => nav('/', { replace: true })} />
+        )}
+        <div className="auth-alt" style={{ marginTop: 0 }}>
+          <button type="button" className="link-btn" onClick={() => { setUsePassword((v) => !v); setError(null) }}>
+            {usePassword ? 'Sign in with an email code instead' : 'Sign in with a password instead'}
+          </button>
+        </div>
+
+        {usePassword && (
         <form className="card stack" onSubmit={onSubmit}>
           <div className="field">
             <label className="label">Email</label>
@@ -75,6 +88,7 @@ export function LoginPage() {
             {busy ? 'Signing in…' : 'Sign in'}
           </button>
         </form>
+        )}
 
         <div className="auth-alt">
           New to ShareChef? <Link to="/signup">Create an account</Link>
