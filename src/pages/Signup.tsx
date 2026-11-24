@@ -1,19 +1,11 @@
 import { useState } from 'react'
-import type { FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { supabase } from '../lib/supabaseClient'
 import { stashPendingProfile } from '../hooks/useAuth'
+import { EmailCodeForm } from '../components/EmailCodeForm'
 import { track } from '../lib/events'
 
 export function SignupPage() {
   const nav = useNavigate()
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [confirmPassword, setConfirmPassword] = useState('')
-  const [showPassword, setShowPassword] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [notice, setNotice] = useState<string | null>(null)
 
   const [glutenFree, setGlutenFree] = useState(false)
   const [dairyFree, setDairyFree] = useState(false)
@@ -21,90 +13,33 @@ export function SignupPage() {
   const [celiac, setCeliac] = useState(false)
   const [allergiesDraft, setAllergiesDraft] = useState('')
 
-  const onSubmit = async (e: FormEvent) => {
-    e.preventDefault()
-    setError(null)
-    setNotice(null)
-    if (password !== confirmPassword) {
-      return setError('Passwords do not match. Please retype them.')
-    }
-    setBusy(true)
-
+  // Saved before the code is sent; the profile is created on first sign-in.
+  const stashAnswers = () => {
     const allergies = allergiesDraft
       .split(',')
-      .map((s) => s.trim())
+      .map((x) => x.trim())
       .filter(Boolean)
     stashPendingProfile({ glutenFree, dairyFree, kosher, celiac, allergies })
-
-    const { data, error } = await supabase.auth.signUp({ email, password })
-    setBusy(false)
-    if (error) return setError(error.message)
-    track('account_created', undefined, data.session?.access_token ?? null)
-    if (data.session) {
-      nav('/', { replace: true })
-    } else {
-      setNotice('Account created. Check your email to confirm, then sign in.')
-    }
   }
 
   return (
     <div className="auth-wrap">
       <div className="auth-card stack">
         <div className="auth-hero">
-          <div className="auth-logo"><span className="brand-dot" /> ShareChef</div>
+          <div className="auth-logo">ShareChef</div>
           <div className="spacer" />
           <div className="auth-title">Create your kitchen</div>
           <div className="auth-sub">Save recipes and earn your Micheli Star.</div>
         </div>
 
-        <form className="card stack" onSubmit={onSubmit}>
-          <div className="field">
-            <label className="label">Email</label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
-              autoComplete="email"
-              required
-            />
-          </div>
-          <div className="field">
-            <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-              <label className="label">Password</label>
-              <button
-                type="button"
-                className="btn btn-ghost"
-                style={{ padding: '2px 8px', fontSize: 13 }}
-                onClick={() => setShowPassword((v) => !v)}
-                aria-label={showPassword ? 'Hide password' : 'Show password'}
-              >
-                {showPassword ? '🙈 Hide' : '👁 Show'}
-              </button>
-            </div>
-            <input
-              type={showPassword ? 'text' : 'password'}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="At least 6 characters"
-              autoComplete="new-password"
-              minLength={6}
-              required
-            />
-          </div>
-          <div className="field">
-            <label className="label">Confirm password</label>
-            <input
-              type={showPassword ? 'text' : 'password'}
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-              placeholder="Type it again"
-              autoComplete="new-password"
-              minLength={6}
-              required
-            />
-          </div>
-
+        <EmailCodeForm
+          mode="signup"
+          onBeforeSend={stashAnswers}
+          onSignedIn={(session) => {
+            track('account_created', undefined, session?.access_token ?? null)
+            nav('/', { replace: true })
+          }}
+        >
           <div className="field">
             <label className="label">Dietary preferences (optional)</label>
             <div className="stack" style={{ gap: 6 }}>
@@ -136,12 +71,7 @@ export function SignupPage() {
             />
           </div>
 
-          {error && <div className="alert alert-error">{error}</div>}
-          {notice && <div className="alert alert-ok">{notice}</div>}
-          <button className="btn btn-primary btn-block" disabled={busy}>
-            {busy ? 'Creating…' : 'Create account'}
-          </button>
-        </form>
+        </EmailCodeForm>
 
         <div className="auth-alt">
           Already have an account? <Link to="/login">Sign in</Link>

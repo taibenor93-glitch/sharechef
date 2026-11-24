@@ -46,10 +46,23 @@ export function trackStream(stream: MediaStream): void {
   streams.push(stream)
 }
 
+function audioTracks(s: MediaStream): MediaStreamTrack[] {
+  try {
+    return s.getAudioTracks?.() ?? s.getTracks?.() ?? []
+  } catch {
+    return []
+  }
+}
+
 export function liveMicTracks(): number {
   let live = 0
-  for (const s of streams) for (const t of s.getAudioTracks()) if (t.readyState === 'live') live++
+  for (const s of streams) for (const t of audioTracks(s)) if (t.readyState === 'live') live++
   return live
+}
+
+/** Audio track count of one stream, tolerant of partial MediaStream objects. */
+export function trackCount(s: MediaStream): number {
+  return audioTracks(s).length
 }
 
 export function streamsOpened(): number {

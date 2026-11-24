@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth, setGuest } from '../hooks/useAuth'
 import { supabase } from '../lib/supabaseClient'
 import { RealtimeVoice } from '../voice/realtimeVoice'
+import { noteFinishedCook } from '../lib/appReview'
 import type { VoiceStatus } from '../voice/realtimeVoice'
 import { generateRecipe, recipeFromCook } from '../lib/recipeApi'
 import type { GeneratedRecipe } from '../lib/recipeApi'
@@ -50,6 +51,25 @@ export function HomePage() {
   const [savingClip, setSavingClip] = useState(false)
   const [recInfo, setRecInfo] = useState<string | null>(null)
   useEffect(() => { setDiagUser(userId) }, [userId])
+  // Apple's recorder keeps running when you leave the Cook screen, but this
+  // screen's state does not survive. Ask the recorder on every open, so a
+  // recording in progress always comes back with its Stop button (and saves).
+  // The sound tape lives at module level, so it keeps its place meanwhile.
+  useEffect(() => {
+    if (!showRecorder) return
+    let cancelled = false
+    withTimeout(ScreenRecorder.isRecording(), 3000, "Apple's screen recorder")
+      .then(({ recording: on }) => {
+        if (cancelled || !on) return
+        diag('record_resume', { taping: isTaping() })
+        setRecording(true)
+        if (!isTaping()) {
+          setRecError('A recording is running, but its sound copy was lost when the app restarted. Tap Stop to end it; this one will save without sound.')
+        }
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [showRecorder])
   async function toggleRecording() {
     setRecError(null)
     setRecInfo(null)
@@ -274,15 +294,25 @@ export function HomePage() {
   const [cookWrapUp, setCookWrapUp] = useState<'idle' | 'working' | 'none' | 'error'>('idle')
 
   const finishVoiceCook = async (said: Line[]) => {
+    // Diagnostics (owner only), logged under the existing "disconnect" report.
+    const userLines = said.filter((l) => l.role === 'user').length
+    const chefLines = said.filter((l) => l.role === 'chef').length
     // Nothing worth writing up: Micheli never heard the user, or never answered.
-    if (!said.some((l) => l.role === 'user') || !said.some((l) => l.role === 'chef')) return
+    if (!userLines || !chefLines) {
+      diag('disconnect', { step: 'finish', userLines, chefLines, result: 'skipped-no-chat' })
+      return
+    }
     lastCookRef.current = said
     const { data } = await supabase.auth.getSession()
     const token = data.session?.access_token
-    if (!token || !userId) return // voice cooks are signed-in only
+    if (!token || !userId) {
+      diag('disconnect', { step: 'finish', userLines, chefLines, result: 'skipped-no-session', token: !!token, user: !!userId })
+      return // voice cooks are signed-in only
+    }
     setCookWrapUp('working')
     try {
       const r = await recipeFromCook(said, language, token)
+      diag('disconnect', { step: 'finish', userLines, chefLines, result: r ? 'recipe' : 'no-dish' })
       if (!r) { setCookWrapUp('none'); return }
       setCookWrapUp('idle')
       setGenError(null)
@@ -292,7 +322,10 @@ export function HomePage() {
       setPhotoStep('ask')
       await saveRecipe(r, userId)
       recipeCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    } catch {
+      // 3rd finished cook with a saved recipe: ask for an App Store rating (once).
+      void noteFinishedCook()
+    } catch (e) {
+      diag('disconnect', { step: 'finish', userLines, chefLines, result: 'error', message: (e instanceof Error ? e.message : String(e)).slice(0, 120) })
       setCookWrapUp('error')
     }
   }

@@ -6,7 +6,7 @@ import { recordShare } from '../lib/shares'
 import type { ShareChannel } from '../lib/shares'
 import { dishPhotoFile, dishPhotoUrl, removeDishPhoto } from '../lib/dishPhoto'
 import { DishPhotoPrompt } from '../components/DishPhotoPrompt'
-import { recipeShareText } from '../lib/recipeShareText'
+import { recipeShareText, APP_STORE_LINK } from '../lib/recipeShareText'
 
 export function SavedDetailPage() {
   const { id } = useParams()
@@ -16,6 +16,8 @@ export function SavedDetailPage() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [shareMsg, setShareMsg] = useState<string | null>(null)
+  // After a photo share: some apps keep only the photo, so offer the recipe on a fresh tap.
+  const [offerCopy, setOfferCopy] = useState(false)
   const [photoUrl, setPhotoUrl] = useState<string | null>(null)
   // Loaded ahead of time: iOS only opens the share sheet straight from a tap,
   // so there is no time to download the photo after the button is pressed.
@@ -62,7 +64,7 @@ export function SavedDetailPage() {
     nav('/saved', { replace: true })
   }
 
-  const APP_LINK = 'https://apps.apple.com/app/sharechef-ai/id6787142176'
+  const APP_LINK = APP_STORE_LINK
   const shareText = recipe
     ? `${recipe.title} — a dish I made with Micheli on ShareChef AI 🍳👨‍🍳`
     : 'Cook with Micheli on ShareChef AI 🍳'
@@ -82,6 +84,7 @@ export function SavedDetailPage() {
   // for pasting as the caption.
   const sharePhoto = async (channel: ShareChannel, file: File, label?: string) => {
     setShareMsg(null)
+    setOfferCopy(false)
     navigator.clipboard?.writeText(fullRecipeText).catch(() => {}) // not awaited: keep the tap fresh for share()
     try {
       await navigator.share({ files: [file], title: recipe?.title ?? 'ShareChef AI', text: fullRecipeText })
@@ -91,8 +94,20 @@ export function SavedDetailPage() {
     const earned = await recordShare(channel, id ?? null)
     const pick = label ? `Pick ${label} in the share sheet. ` : ''
     setShareMsg(
-      `${earned ? '⭐ +1 Micheli Star! ' : ''}${pick}Recipe copied too, paste it as your caption if it's missing.${earned ? '' : ' Sign in to earn Micheli Stars.'}`
+      `${earned ? '⭐ +1 Micheli Star! ' : ''}${pick}If the recipe didn't come through with the photo, tap Copy recipe and paste it.${earned ? '' : ' Sign in to earn Micheli Stars.'}`
     )
+    setOfferCopy(true)
+  }
+
+  // A fresh tap, so the copy works even where the automatic one was blocked.
+  const copyRecipe = async () => {
+    try {
+      await navigator.clipboard.writeText(fullRecipeText)
+      setShareMsg('Recipe and App Store link copied. Paste it with your photo.')
+    } catch {
+      setShareMsg('Copy was blocked on this device. Select the recipe text on this page to copy it.')
+    }
+    setOfferCopy(false)
   }
 
   // Channel buttons: with a photo, open the share sheet; without, the old link.
@@ -130,6 +145,7 @@ export function SavedDetailPage() {
 
   const onShare = async () => {
     setShareMsg(null)
+    setOfferCopy(false)
     if (canSharePhoto(photoFile)) return sharePhoto('native', photoFile)
     try {
       if (typeof navigator !== 'undefined' && navigator.share) {
@@ -214,6 +230,9 @@ export function SavedDetailPage() {
               <button type="button" className="btn btn-ghost" onClick={onChannel('youtube', 'YouTube', () => copyAndOpen('youtube', 'https://www.youtube.com/'))}>YouTube</button>
             </div>
             {shareMsg && <div className="muted" style={{ marginTop: 4 }}>{shareMsg}</div>}
+            {offerCopy && (
+              <button type="button" className="btn btn-ghost" onClick={copyRecipe}>📋 Copy recipe</button>
+            )}
           </div>
 
           {error && <div className="alert alert-error">{error}</div>}

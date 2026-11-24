@@ -5,7 +5,7 @@ import { PRIVACY_URL, TERMS_URL } from '../lib/purchases'
 
 export function Layout() {
   const nav = useNavigate()
-  const { session, guest } = useAuth()
+  const { session } = useAuth()
 
   const leave = async () => {
     if (session) await supabase.auth.signOut()
@@ -20,8 +20,10 @@ export function Layout() {
     <div className="app">
       <header className="topbar">
         <div className="topbar-inner">
+          {/* No gold brand dot here: on a phone it sat alone in the top bar and
+              read as a recording light. The dot stays on sign-in and other brand
+              spots; the app's brand comes through the whole system instead. */}
           <NavLink to="/" className="brand" aria-label="ShareChef home">
-            <span className="brand-dot" />
             <span className="brand-name">ShareChef</span>
           </NavLink>
           <nav className="nav">
@@ -29,7 +31,7 @@ export function Layout() {
             <NavLink to="/saved" className={linkClass}>My recipes</NavLink>
             <NavLink to="/preferences" className={linkClass}>Preferences</NavLink>
             <button type="button" className="nav-link nav-signout" onClick={leave}>
-              {guest && !session ? 'Sign in' : 'Sign out'}
+              {session ? 'Sign out' : 'Sign in'}
             </button>
           </nav>
         </div>
