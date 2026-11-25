@@ -7,7 +7,7 @@ import type { ShareChannel } from '../lib/shares'
 import { dishPhotoFile, dishPhotoUrl, removeDishPhoto } from '../lib/dishPhoto'
 import { DishPhotoPrompt } from '../components/DishPhotoPrompt'
 import { recipeShareText, APP_STORE_LINK } from '../lib/recipeShareText'
-import { MAX_CLIP_SECONDS, canMakeShareVideo, makeRecipeShareVideo } from '../lib/recipeShareVideo'
+import { MAX_CLIP_SECONDS, ShareVideoCancelled, canMakeShareVideo, makeRecipeShareVideo } from '../lib/recipeShareVideo'
 import type { VideoProgress } from '../lib/recipeShareVideo'
 
 export function SavedDetailPage() {
@@ -20,6 +20,8 @@ export function SavedDetailPage() {
   const [shareMsg, setShareMsg] = useState<string | null>(null)
   // After a photo share: some apps keep only the photo, so offer the recipe on a fresh tap.
   const [offerCopy, setOfferCopy] = useState(false)
+  // What the last share sent, so the copy message says photo or video.
+  const [lastShareKind, setLastShareKind] = useState<'photo' | 'video'>('photo')
   const [photoUrl, setPhotoUrl] = useState<string | null>(null)
   // Loaded ahead of time: iOS only opens the share sheet straight from a tap,
   // so there is no time to download the photo after the button is pressed.
@@ -74,19 +76,44 @@ export function SavedDetailPage() {
     setVideoError(null)
   }
 
-  // Started from a tap so iOS lets the clip play while it is recorded.
+  // The video being made right now, so leaving the page (or opening another
+  // recipe) stops it instead of letting it run on in the background.
+  const makingRef = useRef<AbortController | null>(null)
+  useEffect(() => {
+    setClip(null)
+    setShareVideo(null)
+    setVideoError(null)
+    setVideoProgress(null)
+    return () => {
+      makingRef.current?.abort()
+      makingRef.current = null
+    }
+  }, [id])
+
+  // Called straight from the tap, with no await before makeRecipeShareVideo,
+  // so iOS lets the clip play while it is recorded.
   const onMakeVideo = async () => {
     if (!clip || !recipe) return
+    makingRef.current?.abort()
+    const job = new AbortController()
+    makingRef.current = job
     setVideoError(null)
     setShareVideo(null)
     setVideoProgress({ phase: 'clip', fraction: 0 })
+    const base = recipe.title.replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '-').slice(0, 60) || 'my-dish'
     try {
-      const base = recipe.title.replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '-').slice(0, 60) || 'my-dish'
-      setShareVideo(await makeRecipeShareVideo(clip, recipe, base, setVideoProgress))
+      const file = await makeRecipeShareVideo(
+        clip, recipe, base,
+        (p) => { if (!job.signal.aborted) setVideoProgress(p) },
+        job.signal
+      )
+      if (!job.signal.aborted) setShareVideo(file)
     } catch (err) {
+      if (job.signal.aborted || err instanceof ShareVideoCancelled) return
       setVideoError(err instanceof Error ? err.message : 'Could not make the video. Try again.')
     } finally {
-      setVideoProgress(null)
+      if (!job.signal.aborted) setVideoProgress(null)
+      if (makingRef.current === job) makingRef.current = null
     }
   }
 
@@ -130,6 +157,7 @@ export function SavedDetailPage() {
   const sharePhoto = async (channel: ShareChannel, file: File, label?: string, kind: 'photo' | 'video' = 'photo') => {
     setShareMsg(null)
     setOfferCopy(false)
+    setLastShareKind(kind)
     navigator.clipboard?.writeText(fullRecipeText).catch(() => {}) // not awaited: keep the tap fresh for share()
     try {
       await navigator.share({ files: [file], title: recipe?.title ?? 'ShareChef AI', text: fullRecipeText })
@@ -148,7 +176,7 @@ export function SavedDetailPage() {
   const copyRecipe = async () => {
     try {
       await navigator.clipboard.writeText(fullRecipeText)
-      setShareMsg('Recipe and App Store link copied. Paste it with your photo.')
+      setShareMsg(`Recipe and App Store link copied. Paste it with your ${lastShareKind}.`)
     } catch {
       setShareMsg('Copy was blocked on this device. Select the recipe text on this page to copy it.')
     }

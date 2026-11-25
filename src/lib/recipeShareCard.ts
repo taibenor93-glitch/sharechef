@@ -1,4 +1,4 @@
-// Drawing for the share video: the recipe panel, the ShareChef end frame, and
+// Drawing for the share video: the recipe pages, the ShareChef end frame, and
 // the logo and QR code both use. Threads, Instagram and Facebook drop the text
 // from a share, so whatever is not drawn into the video never arrives there.
 import QRCode from 'qrcode'
@@ -7,9 +7,7 @@ import { APP_STORE_LINK } from './recipeShareText'
 
 export type ShareableRecipe = Pick<Recipe, 'title' | 'description' | 'ingredients' | 'steps' | 'nutrition'>
 
-const W = 1080
 const PAD = 72
-const MAX_H = 9000 // iOS caps canvas area (~16.7M px); 1080 x 9000 stays well inside
 export const PLUM = '#2D0826'
 const INK = '#f6efe4'
 const SOFT = '#d6c5d0'
@@ -28,14 +26,31 @@ export function loadImage(src: string): Promise<HTMLImageElement> {
   })
 }
 
+// A word wider than the line (a URL, a long unbroken string) is cut into
+// pieces that fit, so nothing runs off the edge.
+function breakWord(ctx: CanvasRenderingContext2D, word: string, maxWidth: number): string[] {
+  if (ctx.measureText(word).width <= maxWidth) return [word]
+  const parts: string[] = []
+  let cur = ''
+  for (const ch of Array.from(word)) {
+    if (cur && ctx.measureText(cur + ch).width > maxWidth) { parts.push(cur); cur = ch }
+    else cur += ch
+  }
+  if (cur) parts.push(cur)
+  return parts
+}
+
 function wrap(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
   const out: string[] = []
   for (const para of text.split('\n')) {
     let line = ''
     for (const word of para.split(/\s+/).filter(Boolean)) {
-      const next = line ? `${line} ${word}` : word
-      if (ctx.measureText(next).width <= maxWidth || !line) line = next
-      else { out.push(line); line = word }
+      breakWord(ctx, word, maxWidth).forEach((part, i) => {
+        if (i > 0) { out.push(line); line = part; return } // the piece before filled its line
+        const next = line ? `${line} ${part}` : part
+        if (!line || ctx.measureText(next).width <= maxWidth) line = next
+        else { out.push(line); line = part }
+      })
     }
     out.push(line)
   }
@@ -53,80 +68,115 @@ export async function loadBrandAssets(): Promise<BrandAssets> {
   return { logo, qr }
 }
 
-// Lays the recipe out top to bottom. With draw=false it only measures, so the
-// canvas can be sized to fit before the real pass. Returns the total height.
-function layout(ctx: CanvasRenderingContext2D, r: ShareableRecipe, k: number, draw: boolean): number {
-  const textW = W - PAD * 2
-  let y = PAD
+// One wrapped line of text, drawn with its top at `top`.
+type Line = { h: number; draw: (ctx: CanvasRenderingContext2D, top: number) => void }
+// One item (a title, an ingredient, a step) whose lines stay on one page when they fit.
+type Group = { lines: Line[]; gapAfter: number; keepWithNext: boolean }
 
-  const block = (text: string, font: string, color: string, size: number, gapAfter: number, indent = 0, prefix = '') => {
+const groupHeight = (g: Group) => g.lines.reduce((sum, l) => sum + l.h, 0)
+
+function buildGroups(ctx: CanvasRenderingContext2D, r: ShareableRecipe, width: number): Group[] {
+  const textW = width - PAD * 2
+  const groups: Group[] = []
+
+  const block = (text: string, font: string, color: string, size: number, gapAfter: number, indent = 0, prefix = '', keepWithNext = false): Group => {
     ctx.font = font
     const lh = Math.round(size * 1.32)
-    const lines = wrap(ctx, text, textW - indent)
-    lines.forEach((line, i) => {
-      if (draw) {
-        ctx.fillStyle = color
-        if (prefix && i === 0) { ctx.fillStyle = GOLD; ctx.fillText(prefix, PAD, y + size); ctx.fillStyle = color }
-        ctx.fillText(line, PAD + indent, y + size)
-      }
-      y += lh
-    })
-    y += gapAfter
+    const lines: Line[] = wrap(ctx, text, textW - indent).map((line, i) => ({
+      h: lh,
+      draw: (c, top) => {
+        c.font = font
+        if (prefix && i === 0) { c.fillStyle = GOLD; c.fillText(prefix, PAD, top + size) }
+        c.fillStyle = color
+        c.fillText(line, PAD + indent, top + size)
+      },
+    }))
+    const g = { lines, gapAfter, keepWithNext }
+    groups.push(g)
+    return g
   }
-  const heading = (text: string) => {
-    const size = Math.round(40 * k)
-    block(text, `600 ${size}px ${SERIF}`, GOLD, size, Math.round(14 * k))
-  }
+  // A heading never sits alone at the bottom of a page.
+  const heading = (text: string) => block(text, `600 40px ${SERIF}`, GOLD, 40, 14, 0, '', true)
 
-  const titleSize = Math.round(68 * k)
-  block(r.title, `600 ${titleSize}px ${SERIF}`, INK, titleSize, Math.round(12 * k))
-  if (r.description) {
-    const s = Math.round(34 * k)
-    block(r.description, `italic ${s}px ${SERIF}`, SOFT, s, Math.round(10 * k))
-  }
-  const by = Math.round(28 * k)
-  block('From my cook with Micheli', `500 ${by}px ${SANS}`, GOLD, by, Math.round(44 * k))
+  block(r.title, `600 68px ${SERIF}`, INK, 68, 12)
+  if (r.description) block(r.description, `italic 34px ${SERIF}`, SOFT, 34, 10)
+  block('From my cook with Micheli', `500 28px ${SANS}`, GOLD, 28, 44)
 
-  const body = Math.round(34 * k)
   const ingredients = Array.isArray(r.ingredients) ? r.ingredients : []
   const steps = Array.isArray(r.steps) ? r.steps : []
   if (ingredients.length) {
     heading('Ingredients')
-    ingredients.forEach((i) => block(i, `${body}px ${SANS}`, INK, body, Math.round(8 * k), Math.round(40 * k), '•'))
-    y += Math.round(36 * k)
+    let last: Group | null = null
+    for (const i of ingredients) last = block(i, `34px ${SANS}`, INK, 34, 8, 40, '•')
+    if (last) last.gapAfter += 36
   }
   if (steps.length) {
     heading('Steps')
-    steps.forEach((s, i) => block(s, `${body}px ${SANS}`, INK, body, Math.round(14 * k), Math.round(56 * k), `${i + 1}.`))
-    y += Math.round(22 * k)
+    let last: Group | null = null
+    for (const [i, s] of steps.entries()) last = block(s, `34px ${SANS}`, INK, 34, 14, 56, `${i + 1}.`)
+    if (last) last.gapAfter += 22
   }
-  if (r.nutrition) {
-    const s = Math.round(30 * k)
-    block(`🥗 Nutrition (per serving, estimate): ${r.nutrition}`, `${s}px ${SANS}`, SOFT, s, Math.round(20 * k))
-  }
-  return y + Math.round(24 * k)
+  if (r.nutrition) block(`🥗 Nutrition (per serving, estimate): ${r.nutrition}`, `30px ${SANS}`, SOFT, 30, 20)
+  return groups
 }
 
-// The full recipe on its own canvas, for the video's recipe frame. Long
-// recipes shrink the type instead of getting cut off.
-export async function renderRecipePanel(recipe: ShareableRecipe): Promise<HTMLCanvasElement | null> {
+function paginate(groups: Group[], contentH: number): Group[][] {
+  // An item taller than a whole page is split line by line.
+  const gs = groups.flatMap((g) =>
+    groupHeight(g) <= contentH
+      ? [g]
+      : g.lines.map((l, i) => ({ lines: [l], gapAfter: i === g.lines.length - 1 ? g.gapAfter : 0, keepWithNext: false }))
+  )
+  const pages: Group[][] = [[]]
+  let used = 0
+  gs.forEach((g, i) => {
+    const page = pages[pages.length - 1]
+    const gap = page.length ? page[page.length - 1].gapAfter : 0
+    let need = gap + groupHeight(g)
+    const next = gs[i + 1]
+    if (g.keepWithNext && next) need += g.gapAfter + groupHeight(next)
+    if (page.length && used + need > contentH) {
+      pages.push([g])
+      used = groupHeight(g)
+    } else {
+      page.push(g)
+      used += gap + groupHeight(g)
+    }
+  })
+  return pages
+}
+
+// The full recipe as pages of width x height, at a size people can read on a
+// phone. Long recipes get more pages instead of smaller type, and nothing is cut.
+export async function renderRecipePages(recipe: ShareableRecipe, width: number, height: number): Promise<HTMLCanvasElement[]> {
   if (document.fonts?.ready) await document.fonts.ready.catch(() => undefined)
-  const canvas = document.createElement('canvas')
-  const ctx = canvas.getContext('2d')
-  if (!ctx) return null
-  let k = 1
-  let h = layout(ctx, recipe, k, false)
-  for (let i = 0; i < 4 && h > MAX_H; i++) {
-    k *= 0.85
-    h = layout(ctx, recipe, k, false)
-  }
-  canvas.width = W
-  canvas.height = Math.min(h, MAX_H)
-  ctx.fillStyle = PLUM
-  ctx.fillRect(0, 0, W, canvas.height)
-  ctx.textBaseline = 'alphabetic'
-  layout(ctx, recipe, k, true)
-  return canvas
+  const measure = document.createElement('canvas').getContext('2d')
+  if (!measure) return []
+  const pages = paginate(buildGroups(measure, recipe, width), height - PAD - PAD / 2)
+
+  return pages.flatMap((page, index) => {
+    const canvas = document.createElement('canvas')
+    canvas.width = width
+    canvas.height = height
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return []
+    ctx.fillStyle = PLUM
+    ctx.fillRect(0, 0, width, height)
+    ctx.textBaseline = 'alphabetic'
+    if (pages.length > 1) {
+      ctx.fillStyle = GOLD
+      ctx.font = `24px ${SANS}`
+      ctx.textAlign = 'right'
+      ctx.fillText(`${index + 1} / ${pages.length}`, width - PAD, 44)
+      ctx.textAlign = 'left'
+    }
+    let y = PAD
+    page.forEach((g, gi) => {
+      for (const line of g.lines) { line.draw(ctx, y); y += line.h }
+      if (gi < page.length - 1) y += g.gapAfter
+    })
+    return [canvas]
+  })
 }
 
 // Full-frame ShareChef ending: logo, name, App Store link and a big QR code.
