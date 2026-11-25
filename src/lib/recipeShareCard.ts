@@ -150,16 +150,28 @@ function paginate(groups: Group[], contentH: number): Group[][] {
 // phone. Long recipes get more pages instead of smaller type, and nothing is cut.
 export async function renderRecipePages(recipe: ShareableRecipe, width: number, height: number): Promise<HTMLCanvasElement[]> {
   if (document.fonts?.ready) await document.fonts.ready.catch(() => undefined)
-  const measure = document.createElement('canvas').getContext('2d')
-  if (!measure) return []
+  const measureCanvas = document.createElement('canvas')
+  measureCanvas.width = 1
+  measureCanvas.height = 1
+  const measure = measureCanvas.getContext('2d')
+  if (!measure) throw new Error('Could not draw the recipe.')
   const pages = paginate(buildGroups(measure, recipe, width), height - PAD - PAD / 2)
+  releaseCanvas(measureCanvas)
+  const made: HTMLCanvasElement[] = []
 
-  return pages.flatMap((page, index) => {
+  return pages.map((page, index) => {
     const canvas = document.createElement('canvas')
     canvas.width = width
     canvas.height = height
     const ctx = canvas.getContext('2d')
-    if (!ctx) return []
+    // Out of canvas memory: free what was made and fail, rather than
+    // silently leaving recipe pages out of the video.
+    if (!ctx) {
+      made.forEach(releaseCanvas)
+      releaseCanvas(canvas)
+      throw new Error('Could not draw the recipe.')
+    }
+    made.push(canvas)
     ctx.fillStyle = PLUM
     ctx.fillRect(0, 0, width, height)
     ctx.textBaseline = 'alphabetic'
@@ -175,8 +187,15 @@ export async function renderRecipePages(recipe: ShareableRecipe, width: number, 
       for (const line of g.lines) { line.draw(ctx, y); y += line.h }
       if (gi < page.length - 1) y += g.gapAfter
     })
-    return [canvas]
+    return canvas
   })
+}
+
+// Gives a canvas's memory back straight away. iOS frees it slowly on its own
+// and caps the total, so repeated video making could otherwise run out.
+export function releaseCanvas(canvas: HTMLCanvasElement): void {
+  canvas.width = 0
+  canvas.height = 0
 }
 
 // Full-frame ShareChef ending: logo, name, App Store link and a big QR code.

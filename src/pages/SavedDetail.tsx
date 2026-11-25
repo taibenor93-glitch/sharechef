@@ -100,7 +100,8 @@ export function SavedDetailPage() {
     setVideoError(null)
     setShareVideo(null)
     setVideoProgress({ phase: 'clip', fraction: 0 })
-    const base = recipe.title.replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '-').slice(0, 60) || 'my-dish'
+    // Letters and digits in any language (Crème brûlée, Hebrew, Japanese) stay in the file name.
+    const base = Array.from(recipe.title.replace(/[^\p{L}\p{M}\p{N}\- ]+/gu, '').trim().replace(/\s+/g, '-')).slice(0, 60).join('') || 'my-dish'
     try {
       const file = await makeRecipeShareVideo(
         clip, recipe, base,
@@ -321,7 +322,7 @@ export function SavedDetailPage() {
                     {videoProgress && (
                       <div className="muted">
                         {videoProgress.phase === 'clip' ? 'Adding your clip' : videoProgress.phase === 'recipe' ? 'Adding the recipe' : 'Adding the ShareChef ending'}
-                        … {Math.round(videoProgress.fraction * 100)}%. Keep this screen open.
+                        …{videoProgress.fraction === null ? '' : ` ${Math.round(videoProgress.fraction * 100)}%`}. Keep this screen open.
                       </div>
                     )}
                     {shareVideoUrl && <video src={shareVideoUrl} controls playsInline style={{ width: '100%', maxHeight: 420, borderRadius: 12 }} />}

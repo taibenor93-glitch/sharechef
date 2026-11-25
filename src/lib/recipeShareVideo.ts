@@ -7,7 +7,7 @@
 // Done in the web view: the clip plays into a canvas that MediaRecorder
 // records, with the clip's sound routed through Web Audio. It runs in real
 // time, so the source is capped at MAX_CLIP_SECONDS.
-import { PLUM, drawBrandFrame, loadBrandAssets, renderRecipePages } from './recipeShareCard'
+import { PLUM, drawBrandFrame, loadBrandAssets, releaseCanvas, renderRecipePages } from './recipeShareCard'
 import type { BrandAssets, ShareableRecipe } from './recipeShareCard'
 
 export const MAX_CLIP_SECONDS = 60
@@ -24,16 +24,20 @@ const MAX_FRAME_GAP_MS = 100 // a longer gap means the screen was away; count it
 
 const OPEN_ERROR = 'Could not open that video. Try another one.'
 const STALL_ERROR = 'The video stopped playing before it was finished. Keep this screen open and try again.'
+const BLOCKED_ERROR = 'Your phone did not let the video play. Tap "Make my share video" again.'
+const SETUP_ERROR = 'Could not make the video on this phone. Try again, or share a photo instead.'
 
 // Thrown when the caller cancels (for example by leaving the page).
 export class ShareVideoCancelled extends Error {
   constructor() { super('Share video cancelled') }
 }
 
-// Prefer MP4: it is what iOS records and what every app accepts.
+// MP4 only: it is what Instagram, Threads and TikTok accept. A phone that can
+// only record WebM is told it can't make share videos, instead of getting a
+// file those apps reject.
 export function pickVideoType(): string | null {
   if (typeof MediaRecorder === 'undefined') return null
-  const types = ['video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm']
+  const types = ['video/mp4;codecs=avc1', 'video/mp4']
   return types.find((t) => MediaRecorder.isTypeSupported(t)) ?? null
 }
 
@@ -47,21 +51,36 @@ export function canMakeShareVideo(): boolean {
   )
 }
 
-function withTimeout<T>(p: Promise<T>, ms: number, message: string): Promise<T> {
+// Waits for `p`, but gives up with `message` after `ms`, or at once on cancel.
+function guard<T>(p: Promise<T>, signal: AbortSignal | undefined, ms?: number, message?: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error(message)), ms)
-    p.then((v) => { clearTimeout(t); resolve(v) }, (e) => { clearTimeout(t); reject(e) })
+    if (signal?.aborted) { reject(new ShareVideoCancelled()); return }
+    const t = ms === undefined ? undefined : setTimeout(() => finish(() => reject(new Error(message ?? OPEN_ERROR))), ms)
+    const onAbort = () => finish(() => reject(new ShareVideoCancelled()))
+    const finish = (fn: () => void) => {
+      if (t !== undefined) clearTimeout(t)
+      signal?.removeEventListener('abort', onAbort)
+      fn()
+    }
+    signal?.addEventListener('abort', onAbort)
+    p.then((v) => finish(() => resolve(v)), (e) => finish(() => reject(e)))
   })
+}
+
+function errorName(err: unknown): string {
+  return err instanceof DOMException || err instanceof Error ? err.name : ''
 }
 
 // Plain words for the errors play() can give.
 function playError(err: unknown): Error {
-  const name = err instanceof DOMException || err instanceof Error ? err.name : ''
-  if (name === 'NotAllowedError') return new Error('Your phone did not let the video play. Tap "Make my share video" again.')
+  if (err instanceof ShareVideoCancelled) return err
+  const name = errorName(err)
+  if (name === 'NotAllowedError') return new Error(BLOCKED_ERROR)
   if (name === 'NotSupportedError') return new Error("This video's format can't be used. Try another video.")
-  return err instanceof Error && err.message === STALL_ERROR ? err : new Error(OPEN_ERROR)
+  return new Error(OPEN_ERROR)
 }
 
+// Resolves on the event or after `ms`, whichever comes first.
 function waitForEvent(target: HTMLVideoElement, event: string, ms: number): Promise<void> {
   return new Promise<void>((resolve) => {
     const done = () => { clearTimeout(t); target.removeEventListener(event, done); resolve() }
@@ -101,7 +120,8 @@ function drawBadge(ctx: CanvasRenderingContext2D, brand: BrandAssets) {
   ctx.fillText('Hands-free AI chef · App Store', x + 108, y + 82)
 }
 
-export type VideoProgress = { phase: 'clip' | 'recipe' | 'ending'; fraction: number }
+// fraction is null while the clip's length is unknown.
+export type VideoProgress = { phase: 'clip' | 'recipe' | 'ending'; fraction: number | null }
 
 // Must be called straight from a tap: the part before the first await starts
 // the clip playing inside that tap, which is what lets iOS (Safari too) play
@@ -140,12 +160,17 @@ export async function makeRecipeShareVideo(
 
   let stream: MediaStream | null = null
   let onVisibility: (() => void) | null = null
+  let canvas: HTMLCanvasElement | null = null
+  let pages: HTMLCanvasElement[] = []
   const checkCancel = () => { if (signal?.aborted) throw new ShareVideoCancelled() }
+  // The sound part is ready when there is no sound route, or when it is running.
+  // After a phone call iOS leaves it 'interrupted' or 'suspended'.
+  const audioOk = () => !audioDest || audioCtx.state === 'running'
 
   try {
     // The clip has to start (and so load) within the time limit.
     try {
-      await withTimeout(primed, LOAD_TIMEOUT_MS, OPEN_ERROR)
+      await guard(primed, signal, LOAD_TIMEOUT_MS, OPEN_ERROR)
     } catch (err) {
       throw playError(err)
     }
@@ -153,30 +178,37 @@ export async function makeRecipeShareVideo(
     checkCancel()
     if (v.currentTime > 0) {
       v.currentTime = 0
-      await waitForEvent(v, 'seeked', 3000)
+      await guard(waitForEvent(v, 'seeked', 3000), signal)
     }
 
-    const brand = await loadBrandAssets()
-    const pages = await renderRecipePages(recipe, OUT_W, OUT_H - BADGE_ZONE)
-    checkCancel()
-
-    const canvas = document.createElement('canvas')
-    canvas.width = OUT_W
-    canvas.height = OUT_H
-    const ctx = canvas.getContext('2d')
-    if (!ctx) throw new Error('Could not make the video.')
-
-    // Picture from the canvas, sound from the clip.
-    const s = canvas.captureStream(FPS)
-    stream = s
-    audioDest?.stream.getAudioTracks().forEach((t) => s.addTrack(t))
-
+    // ── setup: drawing and recorder ──
+    let ctx: CanvasRenderingContext2D
+    let brand: BrandAssets
+    let recorder: MediaRecorder
     const chunks: Blob[] = []
-    const recorder = new MediaRecorder(s, { mimeType: type, videoBitsPerSecond: 6_000_000 })
+    try {
+      brand = await guard(loadBrandAssets(), signal)
+      pages = await guard(renderRecipePages(recipe, OUT_W, OUT_H - BADGE_ZONE), signal)
+      canvas = document.createElement('canvas')
+      canvas.width = OUT_W
+      canvas.height = OUT_H
+      const c = canvas.getContext('2d')
+      if (!c) throw new Error(SETUP_ERROR)
+      ctx = c
+      // Picture from the canvas, sound from the clip.
+      const s = canvas.captureStream(FPS)
+      stream = s
+      audioDest?.stream.getAudioTracks().forEach((t) => s.addTrack(t))
+      recorder = new MediaRecorder(s, { mimeType: type, videoBitsPerSecond: 6_000_000 })
+    } catch (err) {
+      if (err instanceof ShareVideoCancelled) throw err
+      throw new Error(SETUP_ERROR)
+    }
     recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data) }
     const stopped = new Promise<void>((res) => { recorder.onstop = () => res() })
 
     // Record only while the screen is showing, so time away is not in the video.
+    let phase: VideoProgress['phase'] = 'clip'
     let hidden = document.visibilityState === 'hidden'
     const canPause = typeof recorder.pause === 'function' && typeof recorder.resume === 'function'
     const setRecording = (on: boolean) => {
@@ -186,18 +218,21 @@ export async function makeRecipeShareVideo(
     }
     onVisibility = () => {
       hidden = document.visibilityState === 'hidden'
-      if (hidden) setRecording(false)
+      if (!hidden) return
+      setRecording(false)
+      // Stop the clip too, or it plays on unseen and that part is lost.
+      if (phase === 'clip') v.pause()
     }
     document.addEventListener('visibilitychange', onVisibility)
 
     let lastEmit = -Infinity
     let lastPhase = ''
-    const emit = (phase: VideoProgress['phase'], fraction: number) => {
+    const emit = (p: VideoProgress['phase'], fraction: number | null) => {
       const now = performance.now()
-      if (phase === lastPhase && now - lastEmit < PROGRESS_EVERY_MS) return
-      lastPhase = phase
+      if (p === lastPhase && now - lastEmit < PROGRESS_EVERY_MS) return
+      lastPhase = p
       lastEmit = now
-      onProgress({ phase, fraction: Math.min(1, Math.max(0, fraction)) })
+      onProgress({ phase: p, fraction: fraction === null ? null : Math.min(1, Math.max(0, fraction)) })
     }
     const frame = (fn: () => void) => new Promise<number>((res) => requestAnimationFrame((t) => { fn(); res(t) }))
     // Shows a still frame for `seconds` of recorded time, not wall-clock time.
@@ -216,14 +251,19 @@ export async function makeRecipeShareVideo(
 
     await audioReady
     try {
-      await v.play()
+      await guard(v.play(), signal)
     } catch (err) {
       throw playError(err)
     }
-    recorder.start(1000)
+    try {
+      recorder.start(1000)
+    } catch {
+      throw new Error(SETUP_ERROR)
+    }
     try {
       // 1) The user's clip, with the ShareChef badge.
-      const clipSeconds = Math.min(Number.isFinite(v.duration) && v.duration > 0 ? v.duration : MAX_CLIP_SECONDS, MAX_CLIP_SECONDS)
+      // Read each frame: some clips only learn their length while playing.
+      const knownLength = () => (Number.isFinite(v.duration) && v.duration > 0 ? Math.min(v.duration, MAX_CLIP_SECONDS) : null)
       const drawClip = () => {
         ctx.fillStyle = '#000'
         ctx.fillRect(0, 0, OUT_W, OUT_H)
@@ -234,35 +274,44 @@ export async function makeRecipeShareVideo(
       let lastMove = performance.now()
       let lastFrame = lastMove
       let lastRetry = 0
-      while (!v.ended && v.currentTime < clipSeconds) {
+      let retryError: unknown = null
+      while (!v.ended && v.currentTime < (knownLength() ?? MAX_CLIP_SECONDS)) {
         checkCancel()
         if (v.error) throw new Error(STALL_ERROR)
         await frame(drawClip)
         const now = performance.now()
         if (now - lastFrame > 1000) lastMove = now // the screen was away: that is not a stall
         lastFrame = now
-        if (v.currentTime !== lastTime) {
+        const ready = !v.paused && audioOk()
+        if (ready && v.currentTime !== lastTime) {
           lastTime = v.currentTime
           lastMove = now
+          retryError = null
         } else if (now - lastMove > STALL_TIMEOUT_MS) {
-          throw new Error(STALL_ERROR)
+          // If the phone kept refusing to restart it, say so plainly.
+          const name = errorName(retryError)
+          throw name === 'NotAllowedError' || name === 'NotSupportedError' ? playError(retryError) : new Error(STALL_ERROR)
         }
         // Paused by the system (a call, an audio interruption, leaving the app):
-        // stop recording, and try to carry on once a second.
-        if (v.paused && !v.ended) {
+        // stop recording until both the clip and its sound run again, and try
+        // to restart them once a second.
+        if (!ready) {
           setRecording(false)
           if (!hidden && now - lastRetry > 1000) {
             lastRetry = now
-            void v.play().catch(() => undefined)
+            if (!audioOk()) void audioCtx.resume().catch((e) => { retryError = e })
+            if (v.paused && !v.ended) void v.play().catch((e) => { retryError = e })
           }
         } else {
           setRecording(!hidden)
         }
-        emit('clip', v.currentTime / clipSeconds)
+        const len = knownLength()
+        emit('clip', len === null ? null : v.currentTime / len)
       }
       v.pause()
 
       // 2) The full recipe, page by page.
+      phase = 'recipe'
       for (const [i, page] of pages.entries()) {
         await hold(RECIPE_PAGE_SECONDS, () => {
           ctx.fillStyle = PLUM
@@ -273,6 +322,7 @@ export async function makeRecipeShareVideo(
       }
 
       // 3) ShareChef ending: logo, App Store link, QR code.
+      phase = 'ending'
       await hold(BRAND_SECONDS, () => drawBrandFrame(ctx, OUT_W, OUT_H, brand), (shown) => emit('ending', shown / BRAND_SECONDS))
     } finally {
       if (recorder.state !== 'inactive') recorder.stop()
@@ -280,16 +330,18 @@ export async function makeRecipeShareVideo(
     }
     checkCancel()
 
-    const ext = type.startsWith('video/mp4') ? 'mp4' : 'webm'
-    const blob = new Blob(chunks, { type: type.split(';')[0] })
+    const blob = new Blob(chunks, { type: 'video/mp4' })
     if (!blob.size) throw new Error('The video came out empty. Try again.')
-    return new File([blob], `${baseName}.${ext}`, { type: blob.type })
+    return new File([blob], `${baseName}.mp4`, { type: blob.type })
   } finally {
     if (onVisibility) document.removeEventListener('visibilitychange', onVisibility)
     v.pause()
     v.removeAttribute('src')
     v.load() // releases the decoder
     stream?.getTracks().forEach((t) => t.stop())
+    // iOS frees canvas memory slowly and caps the total, so give it back now.
+    pages.forEach(releaseCanvas)
+    if (canvas) releaseCanvas(canvas)
     URL.revokeObjectURL(videoUrl)
     void audioCtx.close().catch(() => undefined)
   }
