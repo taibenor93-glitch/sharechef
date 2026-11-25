@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import type { Recipe } from '../types/recipe'
@@ -7,6 +7,8 @@ import type { ShareChannel } from '../lib/shares'
 import { dishPhotoFile, dishPhotoUrl, removeDishPhoto } from '../lib/dishPhoto'
 import { DishPhotoPrompt } from '../components/DishPhotoPrompt'
 import { recipeShareText, APP_STORE_LINK } from '../lib/recipeShareText'
+import { MAX_CLIP_SECONDS, canMakeShareVideo, makeRecipeShareVideo } from '../lib/recipeShareVideo'
+import type { VideoProgress } from '../lib/recipeShareVideo'
 
 export function SavedDetailPage() {
   const { id } = useParams()
@@ -53,6 +55,49 @@ export function SavedDetailPage() {
   const canSharePhoto = (file: File | null): file is File =>
     !!file && typeof navigator !== 'undefined' && !!navigator.canShare && navigator.canShare({ files: [file] })
 
+  // ── video share ──
+  const [shareMode, setShareMode] = useState<'photo' | 'video'>('photo')
+  const videoInputRef = useRef<HTMLInputElement | null>(null)
+  const [clip, setClip] = useState<File | null>(null)
+  const [shareVideo, setShareVideo] = useState<File | null>(null)
+  const [videoProgress, setVideoProgress] = useState<VideoProgress | null>(null)
+  const [videoError, setVideoError] = useState<string | null>(null)
+  const videoSupported = useMemo(() => canMakeShareVideo(), [])
+  const shareVideoUrl = useMemo(() => (shareVideo ? URL.createObjectURL(shareVideo) : null), [shareVideo])
+  useEffect(() => () => { if (shareVideoUrl) URL.revokeObjectURL(shareVideoUrl) }, [shareVideoUrl])
+
+  const onPickClip = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0] ?? null
+    e.target.value = ''
+    setClip(f)
+    setShareVideo(null)
+    setVideoError(null)
+  }
+
+  // Started from a tap so iOS lets the clip play while it is recorded.
+  const onMakeVideo = async () => {
+    if (!clip || !recipe) return
+    setVideoError(null)
+    setShareVideo(null)
+    setVideoProgress({ phase: 'clip', fraction: 0 })
+    try {
+      const base = recipe.title.replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '-').slice(0, 60) || 'my-dish'
+      setShareVideo(await makeRecipeShareVideo(clip, recipe, base, setVideoProgress))
+    } catch (err) {
+      setVideoError(err instanceof Error ? err.message : 'Could not make the video. Try again.')
+    } finally {
+      setVideoProgress(null)
+    }
+  }
+
+  const onShareVideo = () => {
+    if (!canSharePhoto(shareVideo)) {
+      setVideoError("This phone can't share the video from here. Try sharing a photo instead.")
+      return
+    }
+    void sharePhoto('native', shareVideo, undefined, 'video')
+  }
+
   const onDelete = async () => {
     if (!id) return
     setBusy(true)
@@ -82,7 +127,7 @@ export function SavedDetailPage() {
   // can't carry a photo, so with a photo every button goes this way. Instagram
   // and Facebook drop text from the share sheet, so the recipe is also copied
   // for pasting as the caption.
-  const sharePhoto = async (channel: ShareChannel, file: File, label?: string) => {
+  const sharePhoto = async (channel: ShareChannel, file: File, label?: string, kind: 'photo' | 'video' = 'photo') => {
     setShareMsg(null)
     setOfferCopy(false)
     navigator.clipboard?.writeText(fullRecipeText).catch(() => {}) // not awaited: keep the tap fresh for share()
@@ -94,7 +139,7 @@ export function SavedDetailPage() {
     const earned = await recordShare(channel, id ?? null)
     const pick = label ? `Pick ${label} in the share sheet. ` : ''
     setShareMsg(
-      `${earned ? '⭐ +1 Micheli Star! ' : ''}${pick}If the recipe didn't come through with the photo, tap Copy recipe and paste it.${earned ? '' : ' Sign in to earn Micheli Stars.'}`
+      `${earned ? '⭐ +1 Micheli Star! ' : ''}${pick}If the recipe didn't come through with the ${kind}, tap Copy recipe and paste it.${earned ? '' : ' Sign in to earn Micheli Stars.'}`
     )
     setOfferCopy(true)
   }
@@ -216,6 +261,48 @@ export function SavedDetailPage() {
 
           <div className="share-block stack" style={{ borderTop: '1px solid rgba(0,0,0,0.08)', paddingTop: 12 }}>
             <div className="section-title">Share this creation</div>
+            <div className="row" style={{ gap: 8 }} role="tablist" aria-label="Share as">
+              <button type="button" role="tab" aria-selected={shareMode === 'photo'} className={shareMode === 'photo' ? 'btn btn-primary' : 'btn btn-ghost'} onClick={() => setShareMode('photo')}>📸 Photo</button>
+              <button type="button" role="tab" aria-selected={shareMode === 'video'} className={shareMode === 'video' ? 'btn btn-primary' : 'btn btn-ghost'} onClick={() => setShareMode('video')}>🎬 Video</button>
+            </div>
+            {shareMode === 'video' ? (
+              <div className="stack" style={{ gap: 8 }}>
+                <div className="muted">
+                  Pick a video of your cook (up to {MAX_CLIP_SECONDS} seconds is used). ShareChef adds the small ShareChef logo, the full recipe, and an ending with the App Store link and QR code.
+                </div>
+                {!videoSupported ? (
+                  <div className="alert alert-error">This phone can't make share videos yet. Share a photo instead.</div>
+                ) : (
+                  <>
+                    <input ref={videoInputRef} type="file" accept="video/*" hidden onChange={onPickClip} />
+                    <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+                      <button type="button" className="btn btn-ghost" disabled={!!videoProgress} onClick={() => videoInputRef.current?.click()}>
+                        {clip ? 'Choose another video' : 'Choose a video'}
+                      </button>
+                      {clip && !shareVideo && (
+                        <button type="button" className="btn btn-primary" disabled={!!videoProgress} onClick={() => { void onMakeVideo() }}>
+                          {videoProgress ? 'Making your video…' : 'Make my share video'}
+                        </button>
+                      )}
+                      {shareVideo && (
+                        <button type="button" className="btn btn-primary" onClick={onShareVideo}>
+                          📤 Share video
+                        </button>
+                      )}
+                    </div>
+                    {videoProgress && (
+                      <div className="muted">
+                        {videoProgress.phase === 'clip' ? 'Adding your clip' : videoProgress.phase === 'recipe' ? 'Adding the recipe' : 'Adding the ShareChef ending'}
+                        … {Math.round(videoProgress.fraction * 100)}%. Keep this screen open.
+                      </div>
+                    )}
+                    {shareVideoUrl && <video src={shareVideoUrl} controls playsInline style={{ width: '100%', maxHeight: 420, borderRadius: 12 }} />}
+                  </>
+                )}
+                {videoError && <div className="alert alert-error">{videoError}</div>}
+              </div>
+            ) : (
+            <>
             <div className="muted" style={{ marginTop: -4, marginBottom: 6 }}>
               {photoUrl ? 'Your photo and the full recipe go out together 🍳' : 'Post to Instagram, TikTok, and more 🍳'}
             </div>
@@ -229,6 +316,8 @@ export function SavedDetailPage() {
               <button type="button" className="btn btn-ghost" onClick={onChannel('tiktok', 'TikTok', () => copyAndOpen('tiktok', 'https://www.tiktok.com/'))}>TikTok</button>
               <button type="button" className="btn btn-ghost" onClick={onChannel('youtube', 'YouTube', () => copyAndOpen('youtube', 'https://www.youtube.com/'))}>YouTube</button>
             </div>
+            </>
+            )}
             {shareMsg && <div className="muted" style={{ marginTop: 4 }}>{shareMsg}</div>}
             {offerCopy && (
               <button type="button" className="btn btn-ghost" onClick={copyRecipe}>📋 Copy recipe</button>
